@@ -14,6 +14,10 @@ class Settings:
     ghl_private_token: str
     ghl_api_base: str
     ghl_api_version: str
+    # Gmail ingestion
+    gmail_address: str
+    gmail_credentials_file: str
+    gmail_token_file: str
 
     @classmethod
     def load(cls) -> "Settings":
@@ -25,6 +29,11 @@ class Settings:
                 "GHL_API_BASE", "https://services.leadconnectorhq.com"
             ),
             ghl_api_version=os.environ.get("GHL_API_VERSION", "2021-07-28"),
+            gmail_address=os.environ.get("GMAIL_ADDRESS", "assistant@vmedical.ca"),
+            gmail_credentials_file=os.environ.get(
+                "GMAIL_CREDENTIALS_FILE", "credentials.json"
+            ),
+            gmail_token_file=os.environ.get("GMAIL_TOKEN_FILE", "token.json"),
         )
 
 

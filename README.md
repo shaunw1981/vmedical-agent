@@ -25,7 +25,8 @@ Caller ──▶ GHL Virtual Voice Agent ──▶ emails transcript ──▶ a
 | Step | Scope | Status |
 |------|-------|--------|
 | 1 | Foundation: project structure, config, secrets, thin GHL client | ✅ done |
-| 2 | Ingestion: read + parse transcript emails (needs a real sample) | ⏳ next |
+| 2a | Inbox connection: Gmail API + read-only OAuth ingestion | ✅ done |
+| 2b | Transcript parsing (needs a real sample email) | ⏳ next |
 | 3 | Understanding: Claude classifies the call + extracts details | ⬜ |
 | 4 | Action: map intents → GHL operations | ⬜ |
 | 5 | Wire end-to-end + deploy | ⬜ |
@@ -37,10 +38,47 @@ real sample email, so the structure matches what GHL actually sends.
 
 ```
 receptionist/
-  config.py       # env-based settings
-  ghl_client.py   # thin GoHighLevel API v2 client
-.env.example      # template — copy to .env and fill in
+  config.py         # env-based settings
+  ghl_client.py     # thin GoHighLevel API v2 client
+  gmail_client.py   # read-only Gmail ingestion for the agent inbox
+authorize_gmail.py  # one-time OAuth consent → writes token.json
+fetch_sample.py     # prints the newest inbox email (connection test / sample grab)
+.env.example        # template — copy to .env and fill in
 ```
+
+## Connecting the agent inbox (Gmail API + OAuth)
+
+The agent reads `assistant@vmedical.ca` with a **read-only** Gmail OAuth
+credential. One-time setup:
+
+**A. In Google Cloud Console** (signed in as / with access to the vmedical.ca
+Workspace):
+
+1. Create a project (e.g. "Valley Medical Agents").
+2. **APIs & Services → Library →** enable the **Gmail API**.
+3. **OAuth consent screen:** User type **Internal** (keeps it inside the
+   vmedical.ca Workspace — no Google verification needed). Add your email as a
+   test user if prompted.
+4. **Credentials → Create credentials → OAuth client ID →** application type
+   **Desktop app**. Download the JSON and save it as `credentials.json` in the
+   repo root.
+
+**B. Authorize the mailbox** (once, on a machine with a browser, signed in as
+`assistant@vmedical.ca`):
+
+```bash
+pip install -r requirements.txt
+python authorize_gmail.py     # opens a browser → consent → writes token.json
+```
+
+**C. Verify the connection** (after a test call has landed a transcript):
+
+```bash
+python fetch_sample.py        # prints the newest email in the inbox
+```
+
+`credentials.json` and `token.json` are gitignored — they hold OAuth secrets and
+must never be committed.
 
 ## Configuration
 
