@@ -59,13 +59,20 @@ def process_google_userinfo(userinfo: dict) -> dict:
     if not email:
         raise LoginError("Google did not return an email address.")
 
-    # Restrict to the company's Google Workspace domain, if one is configured.
-    if config.ALLOWED_EMAIL_DOMAIN:
-        domain = email.split("@")[-1]
-        if domain != config.ALLOWED_EMAIL_DOMAIN:
-            raise LoginError(
-                f"Only {config.ALLOWED_EMAIL_DOMAIN} accounts can sign in."
-            )
+    # Decide whether this account is allowed to sign in. Allowed when:
+    #   - no restriction is configured (allow anyone), OR
+    #   - the email's domain is in the allowed list, OR
+    #   - it's the owner (Super Admin) email, OR
+    #   - it's explicitly listed as an extra allowed email.
+    domain = email.split("@")[-1]
+    allowed = (
+        not config.ALLOWED_EMAIL_DOMAINS
+        or domain in config.ALLOWED_EMAIL_DOMAINS
+        or email == config.SUPER_ADMIN_EMAIL
+        or email in config.EXTRA_ALLOWED_EMAILS
+    )
+    if not allowed:
+        raise LoginError("This account isn't approved to sign in. Contact your administrator.")
 
     user = db.upsert_user_on_login(email, name, role_for_new_user(email))
     if not user["active"]:

@@ -20,11 +20,19 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
 # Secret used to sign login cookies. Set a long random value in .env.
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "change-me-please")
 
-# Only allow logins from this Google Workspace domain (e.g. "glowmedspa.com").
-# Leave blank to allow any Google account (not recommended for production).
-ALLOWED_EMAIL_DOMAIN = os.environ.get("ALLOWED_EMAIL_DOMAIN", "").strip().lower()
+# Allow logins from this Google Workspace domain (e.g. "vmedical.ca"). You can
+# list more than one, separated by commas. Leave blank to allow any Google
+# account (not recommended for production).
+_domains_raw = os.environ.get("ALLOWED_EMAIL_DOMAIN", "").strip().lower()
+ALLOWED_EMAIL_DOMAINS = [d.strip() for d in _domains_raw.split(",") if d.strip()]
 
-# The email that should automatically be the Super Admin on first login.
+# Extra individual emails that are always allowed even if their domain isn't in
+# the list above — handy for an outside admin/consultant. Comma-separated.
+_extra_raw = os.environ.get("EXTRA_ALLOWED_EMAILS", "").strip().lower()
+EXTRA_ALLOWED_EMAILS = [e.strip() for e in _extra_raw.split(",") if e.strip()]
+
+# The email that should automatically be the Super Admin on first login. This
+# email is always allowed to sign in, even if its domain isn't listed above.
 SUPER_ADMIN_EMAIL = os.environ.get("SUPER_ADMIN_EMAIL", "").strip().lower()
 
 # Google OAuth credentials (from Google Cloud Console).
