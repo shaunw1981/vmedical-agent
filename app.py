@@ -10,6 +10,7 @@ the inbox for the team to mark "responded."
 See SETUP-MACMINI.md for how to run it and connect Google + GoHighLevel.
 """
 
+import re
 import sqlite3
 from pathlib import Path
 
@@ -139,19 +140,54 @@ def dashboard(request: Request):
 
 
 # --- Message inbox -----------------------------------------------------------
+_SPEAKER_RE = re.compile(
+    r"^\s*(AI Agent|Assistant|Agent|Receptionist|AI|Bot|Caller|Customer|Client|User|Contact)\s*[:\-]\s*(.*)$",
+    re.IGNORECASE,
+)
+
+
+def _parse_transcript(text: str) -> list[dict]:
+    """
+    Turn a call transcript into a list of conversation turns:
+    [{role: 'agent'|'caller'|'other', label: str, text: str}, ...]
+    so the page can show who said what.
+    """
+    if not text:
+        return []
+    turns: list[dict] = []
+    current = None
+    for line in text.splitlines():
+        m = _SPEAKER_RE.match(line)
+        if m:
+            speaker, said = m.group(1), m.group(2).strip()
+            if re.search(r"agent|assistant|receptionist|bot|\bai\b", speaker, re.I):
+                role, label = "agent", "AI Receptionist"
+            else:
+                role, label = "caller", "Caller"
+            current = {"role": role, "label": label, "text": said}
+            turns.append(current)
+        elif line.strip():
+            if current is not None:
+                current["text"] += "\n" + line.strip()
+            else:
+                turns.append({"role": "other", "label": "", "text": line.strip()})
+    return turns
+
+
 @app.get("/messages", response_class=HTMLResponse)
 def messages_inbox(request: Request, status: str = "new"):
     user, resp = _guard(request, "view_messages")
     if resp:
         return resp
     status_filter = None if status == "all" else status
+    messages = db.list_messages(status_filter)
+    for m in messages:
+        turns = _parse_transcript(m.get("transcript") or "")
+        m["turns"] = turns
+        m["is_conversation"] = any(t["role"] in ("agent", "caller") for t in turns)
     return templates.TemplateResponse(
         "messages.html",
-        _ctx(
-            request, user,
-            messages=db.list_messages(status_filter),
-            active_filter=status,
-        ),
+        _ctx(request, user, messages=messages, active_filter=status),
     )
 
 
