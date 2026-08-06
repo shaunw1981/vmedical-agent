@@ -24,6 +24,7 @@
         <td>
           <strong>{{ m.client_name or 'Unknown' }}</strong><br>
           <span class="muted">{{ m.client_phone }}</span>
+          {% if m.duration %}<br><span class="muted" style="font-size:.78rem">⏱ {{ m.duration }}</span>{% endif %}
         </td>
         <td>
           {% if m.summary %}<div>{{ m.summary }}</div>{% endif %}

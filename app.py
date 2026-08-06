@@ -208,6 +208,23 @@ def toggle_active(request: Request, email: str = Form(...), active: str = Form(.
 
 
 # --- GoHighLevel webhook: after-hours call transcripts -----------------------
+def _norm(key: str) -> str:
+    """Reduce a field name to just its letters/numbers, lowercased, so that
+    'Full Name', 'full_name' and 'fullName' all match."""
+    return "".join(ch for ch in str(key).lower() if ch.isalnum())
+
+
+def _field(payload: dict, *names):
+    """Return the first non-empty value whose key matches any of `names`,
+    ignoring capitalization, spaces, and underscores."""
+    normalized = {_norm(k): v for k, v in payload.items()}
+    for n in names:
+        value = normalized.get(_norm(n))
+        if value not in (None, ""):
+            return value
+    return None
+
+
 @app.post("/webhook/ghl/call")
 async def ghl_call_webhook(request: Request):
     """
@@ -228,39 +245,30 @@ async def ghl_call_webhook(request: Request):
     except Exception:  # noqa: BLE001
         return JSONResponse({"error": "expected JSON"}, status_code=400)
 
-    phone = (
-        payload.get("phone")
-        or payload.get("caller_number")
-        or payload.get("from")
-        or "unknown"
-    )
-    name = (
-        payload.get("contact_name")
-        or payload.get("full_name")
-        or f"{payload.get('first_name', '')} {payload.get('last_name', '')}".strip()
-        or None
-    )
-    transcript = (
-        payload.get("transcript")
-        or payload.get("call_transcript")
-        or payload.get("message")
-        or payload.get("body")
-        or str(payload)
-    )
-    summary = payload.get("summary")
-    ghl_call_id = (
-        payload.get("call_id") or payload.get("id") or payload.get("messageId")
-    )
+    phone = _field(payload, "CallFrom", "phone", "caller_number", "from") or "unknown"
+    name = _field(payload, "Full Name", "contact_name", "full_name", "name")
+    if not name:
+        first = _field(payload, "first_name") or ""
+        last = _field(payload, "last_name") or ""
+        name = f"{first} {last}".strip() or None
+    transcript = _field(
+        payload, "Transcript", "call_transcript", "message", "body"
+    ) or str(payload)
+    summary = _field(payload, "summary", "call_summary")
+    duration = _field(payload, "Duration", "call_duration")
+    ghl_call_id = _field(payload, "call_id", "id", "messageId", "message_id")
 
     client = db.get_or_create_client(phone, name)
     vault_file = obsidian.write_call_transcript(
-        phone=phone, transcript=transcript, caller_name=name, summary=summary
+        phone=phone, transcript=transcript, caller_name=name,
+        summary=summary, duration=duration,
     )
     try:
         message_id = db.add_message(
             client_id=client["id"],
             transcript=transcript,
             summary=summary,
+            duration=str(duration) if duration is not None else None,
             obsidian_file=vault_file,
             ghl_call_id=str(ghl_call_id) if ghl_call_id else None,
         )

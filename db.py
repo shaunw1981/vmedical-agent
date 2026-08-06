@@ -64,6 +64,11 @@ def init_db() -> None:
             );
             """
         )
+        # Lightweight migrations: add columns that newer versions expect, so an
+        # existing database picks them up without being rebuilt.
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
+        if "duration" not in existing:
+            conn.execute("ALTER TABLE messages ADD COLUMN duration TEXT")
 
 
 # --- Users -------------------------------------------------------------------
@@ -144,6 +149,7 @@ def add_message(
     client_id: int,
     transcript: str,
     summary: Optional[str] = None,
+    duration: Optional[str] = None,
     channel: str = "after_hours_call",
     obsidian_file: Optional[str] = None,
     ghl_call_id: Optional[str] = None,
@@ -151,15 +157,16 @@ def add_message(
     with _connect() as conn:
         cur = conn.execute(
             "INSERT INTO messages "
-            "(client_id, created_at, channel, transcript, summary, status, "
-            " obsidian_file, ghl_call_id) "
-            "VALUES (?, ?, ?, ?, ?, 'new', ?, ?)",
+            "(client_id, created_at, channel, transcript, summary, duration, "
+            " status, obsidian_file, ghl_call_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?)",
             (
                 client_id,
                 datetime.now().isoformat(timespec="seconds"),
                 channel,
                 transcript,
                 summary,
+                duration,
                 obsidian_file,
                 ghl_call_id,
             ),

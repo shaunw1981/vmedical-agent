@@ -41,6 +41,7 @@ def write_call_transcript(
     transcript: str,
     caller_name: Optional[str] = None,
     summary: Optional[str] = None,
+    duration: Optional[str] = None,
     source: str = "gohighlevel",
 ) -> Optional[str]:
     """
@@ -58,17 +59,20 @@ def write_call_transcript(
     path = folder / f"{stamp} - after-hours call.md"
 
     summary_block = f"\n## Summary\n\n{summary}\n" if summary else ""
+    duration_line = f"**Length:** {duration}  \n" if duration else ""
     contents = (
         "---\n"
         "type: call-transcript\n"
         f"client: {caller_name or ''}\n"
         f"phone: {phone}\n"
+        f"duration: {duration or ''}\n"
         f"source: {source}\n"
         f"created: {now.isoformat(timespec='seconds')}\n"
         "---\n\n"
         f"# After-hours call — {caller_name or phone}\n\n"
         f"**When:** {now.strftime('%A %B %d, %Y at %I:%M %p')}  \n"
-        f"**Phone:** {phone}\n"
+        f"**Phone:** {phone}  \n"
+        f"{duration_line}"
         f"{summary_block}\n"
         "## Transcript\n\n"
         f"{transcript}\n"
