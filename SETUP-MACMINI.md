@@ -28,12 +28,15 @@ Terminal:
 1. In Safari on the Mac, go to `github.com/shaunw1981/vmedical-agent`.
 2. Green **Code** button → **Download ZIP**.
 3. In **Downloads**, double-click the ZIP to unzip → folder `vmedical-agent-main`.
-4. Move it into **Documents** and rename it to `vmedical-agent`.
+4. Move it into your **Home folder** (in Finder's sidebar, click the little
+   house with your account name — **not** Documents/Desktop/Downloads, which
+   macOS locks down for background apps) and rename it to `vmedical-agent`.
 5. Check Python: open **Terminal** (⌘Space → type Terminal), run
-   `python3 --version`. If “command not found,” install from
-   `python.org/downloads`, then retry.
-6. In Finder: **Documents → vmedical-agent → macmini**, double-click
-   **`install.command`**. Wait for **“Done!”**
+   `python3 --version`. Anything 3.9 or newer is fine. If “command not found,”
+   install from `python.org/downloads`, then retry.
+6. In Finder: **your Home folder → vmedical-agent → macmini**, double-click
+   **`install.command`**. Wait for **“Done!”** (it clears the download security
+   flags for you.)
 
 **✓ Check:** open `http://localhost:8000` — you should see a “Sign in with
 Google” screen (it won't log in until Stage 4; seeing it is the win).
@@ -135,11 +138,11 @@ in Obsidian under **vMedical Agent → Clients → (caller) → Calls**.
 ## Everyday helpers
 - Change settings: double-click **`open-settings.command`**, then
   **`restart.command`**.
-- App log (if something seems off): `~/Documents/vmedical-agent/data/app.log`.
+- App log (if something seems off): `~/vmedical-agent/data/app.log`.
 
 ## Backups
 - The **Obsidian vault** is a folder — back it up (Time Machine / a copy).
-- Dashboard data: `~/Documents/vmedical-agent/data/app.db`.
+- Dashboard data: `~/vmedical-agent/data/app.db`.
 
 ## Keep the Mac always on
 **System Settings → Users & Groups → Automatically log in** as the front-desk

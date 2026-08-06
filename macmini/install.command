@@ -20,6 +20,12 @@ PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 
 echo "==> Project folder: $APP_DIR"
 
+# 0. Remove the internet "quarantine" flag from the project files, so macOS
+#    lets the background service run start.sh (otherwise you get an
+#    "Operation not permitted" error and the app never starts).
+echo "==> Clearing download security flags..."
+xattr -dr com.apple.quarantine "$APP_DIR" 2>/dev/null || true
+
 # 1. Check Python is installed.
 if ! command -v python3 >/dev/null 2>&1; then
     echo "!! Python 3 is not installed."

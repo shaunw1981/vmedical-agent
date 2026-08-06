@@ -50,7 +50,7 @@ def _ctx(request: Request, user: dict, **extra) -> dict:
     return base
 
 
-def _guard(request: Request, capability: str | None = None):
+def _guard(request: Request, capability=None):
     """
     Returns (user, response). If response is not None, the route should return it
     (a redirect to login, or a 403 page). Otherwise user is the logged-in person.
