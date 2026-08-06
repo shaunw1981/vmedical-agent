@@ -10,7 +10,13 @@
            min-height:100vh; }
     .box { background:#fff; border:1px solid #e5e7eb; border-radius:14px;
            padding:2.2rem; width:360px; text-align:center; }
-    .brand { font-size:1.3rem; font-weight:700; margin-bottom:.3rem; }
+    .logo-badge { width:76px; height:76px; border-radius:16px; background:#7c8a73;
+           display:flex; flex-direction:column; align-items:center; justify-content:center;
+           color:#fff; margin:0 auto 1rem; }
+    .logo-badge .rule { width:32px; height:2px; background:#fff; opacity:.92; }
+    .logo-badge .vm { font-family:Georgia,"Times New Roman",serif; font-weight:700;
+           font-size:1.6rem; letter-spacing:.09em; margin:5px 0; }
+    .brand { font-size:1.2rem; font-weight:700; margin-bottom:.3rem; }
     p { color:#6b7280; }
     .gbtn { display:inline-flex; align-items:center; gap:.6rem; margin-top:1rem;
             background:#fff; border:1px solid #d0d5dd; border-radius:8px;
@@ -25,7 +31,8 @@
 </head>
 <body>
   <div class="box">
-    <div class="brand">✦ Spa Dashboard</div>
+    <div class="logo-badge"><span class="rule"></span><span class="vm">VM</span><span class="rule"></span></div>
+    <div class="brand">Valley Medical</div>
     <p>Sign in with your work Google account.</p>
     {% if error %}<div class="err">{{ error }}</div>{% endif %}
     {% if google_ok %}

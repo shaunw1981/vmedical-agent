@@ -6,21 +6,27 @@
   <title>{% block title %}Spa Dashboard{% endblock %}</title>
   <style>
     :root { --bg:#f6f7f9; --card:#fff; --ink:#1f2430; --muted:#6b7280;
-            --line:#e5e7eb; --brand:#4f46e5; --brand-ink:#fff; --ok:#16a34a; }
+            --line:#e5e7eb; --brand:#4f46e5; --brand-ink:#fff; --ok:#16a34a;
+            --brandgreen:#7c8a73; }
     * { box-sizing: border-box; }
     body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;
            background:var(--bg); color:var(--ink); }
-    header { background:var(--card); border-bottom:1px solid var(--line);
-             padding:.8rem 1.2rem; display:flex; align-items:center; gap:1.2rem; }
-    header .brand { font-weight:700; }
-    nav { display:flex; gap:1rem; flex:1; }
-    nav a { color:var(--muted); text-decoration:none; padding:.3rem .1rem;
+    header { background:var(--brandgreen); padding:0 1.3rem; min-height:62px;
+             display:flex; align-items:center; gap:1.5rem; }
+    .brand-logo { display:flex; flex-direction:column; align-items:center;
+                  line-height:1; color:#fff; text-decoration:none; padding:9px 4px; }
+    .brand-logo .rule { width:34px; height:2px; background:#fff; opacity:.92; }
+    .brand-logo .vm { font-family:Georgia,"Times New Roman",serif; font-weight:700;
+                      font-size:1.5rem; letter-spacing:.09em; margin:4px 0; }
+    nav { display:flex; gap:1.15rem; flex:1; }
+    nav a { color:rgba(255,255,255,.82); text-decoration:none; padding:.3rem .1rem;
             border-bottom:2px solid transparent; }
-    nav a.active, nav a:hover { color:var(--ink); border-bottom-color:var(--brand); }
+    nav a.active, nav a:hover { color:#fff; border-bottom-color:#fff; }
     .pill { background:#eef2ff; color:var(--brand); border-radius:999px;
             padding:.05rem .5rem; font-size:.78rem; font-weight:600; }
-    .who { color:var(--muted); font-size:.9rem; }
-    .who a { color:var(--muted); }
+    header .pill { background:rgba(255,255,255,.24); color:#fff; }
+    .who { color:rgba(255,255,255,.92); font-size:.9rem; }
+    .who a { color:#fff; }
     main { max-width:960px; margin:1.5rem auto; padding:0 1.2rem; }
     .card { background:var(--card); border:1px solid var(--line);
             border-radius:12px; padding:1.2rem 1.4rem; margin-bottom:1rem; }
@@ -52,7 +58,11 @@
 <body>
   {% if user %}
   <header>
-    <span class="brand">✦ Spa Dashboard</span>
+    <a class="brand-logo" href="/" aria-label="Valley Medical">
+      <span class="rule"></span>
+      <span class="vm">VM</span>
+      <span class="rule"></span>
+    </a>
     <nav>
       <a href="/" class="{% block nav_home %}{% endblock %}">Home</a>
       {% if can(user.role, 'view_messages') %}
