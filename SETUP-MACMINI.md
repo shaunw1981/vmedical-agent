@@ -1,209 +1,147 @@
 # Spa Dashboard — Setup guide (Build #1)
 
-A step-by-step guide written for **non-developers**. By the end you'll have a
-team **dashboard** running on the Mac Mini, that the team logs into with
-**Google**, showing an **after-hours phone-message inbox**. Each call from
-GoHighLevel's AI receptionist is filed into the client's **Obsidian** record and
-shown in the dashboard to mark "responded."
+**Written for non-developers.** Do the stages in order. There's a friendly,
+tick-as-you-go version of this guide (with a progress bar) that you can keep open
+on your phone — ask Shaun/Claude for the checklist link. This file is the backup
+copy that lives on the Mac.
 
-There are three access levels: **Super Admin**, **Spa Manager**, **Team Member**.
+Total time: about an hour the first time. Only cost: a domain name (~$10/year).
 
-> This is the first build. Client records, in-person consult notes (Granola), and
-> more agents will be added as new sections later — the foundation is built for it.
+Three double-click helpers live in the `macmini` folder so you rarely need
+Terminal:
+- **`install.command`** — sets everything up (Stage 1).
+- **`open-settings.command`** — opens the settings file in TextEdit (Stage 5).
+- **`restart.command`** — applies settings after you change them.
 
-**Time:** about an hour the first time (most of it is the Google + web-address
-setup, which you only do once).
-
----
-
-## The big picture
-
-```
-  GoHighLevel AI receptionist ─▶ Dashboard (on the Mac Mini) ─▶ Obsidian vault
-        (after-hours calls)         team logs in with Google        (the brain)
-                                     sees + responds to messages
-```
-
-Everything runs and is stored on the Mac Mini. A secure "tunnel" gives it a
-private web address so the team can log in from anywhere and GoHighLevel can send
-calls in.
-
-We'll do this in five parts:
-1. Put the project on the Mac and install it.
-2. Give it a secure web address (Cloudflare Tunnel).
-3. Turn on Google Sign-in.
-4. Point it at the Obsidian vault.
-5. Connect the GoHighLevel after-hours calls.
+> First time you double-click any `.command` file, macOS may block it. Fix:
+> right-click the file → **Open** → **Open**. You only do this once per file.
 
 ---
 
-## Part 1 — Install on the Mac Mini
+## Stage 0 — Gather these first
+- The Mac Mini, on and online.
+- Obsidian installed, with the client's vault opened once.
+- The spa's Google account login.
+- A credit card (for the domain).
 
-1. Make sure **Python 3** is installed (if not, get it from
-   https://www.python.org/downloads/ and run the installer).
-2. Download the project: on GitHub, green **Code** button → **Download ZIP**.
-   Unzip it into **Documents** and rename the folder to `vmedical-agent`.
-3. Open the `vmedical-agent/macmini` folder and **double-click `install.command`**.
-   - If macOS blocks it: **right-click → Open → Open** (once).
-   - It sets everything up and makes the dashboard start automatically.
+## Stage 1 — Put the app on the Mac Mini
+1. In Safari on the Mac, go to `github.com/shaunw1981/vmedical-agent`.
+2. Green **Code** button → **Download ZIP**.
+3. In **Downloads**, double-click the ZIP to unzip → folder `vmedical-agent-main`.
+4. Move it into **Documents** and rename it to `vmedical-agent`.
+5. Check Python: open **Terminal** (⌘Space → type Terminal), run
+   `python3 --version`. If “command not found,” install from
+   `python.org/downloads`, then retry.
+6. In Finder: **Documents → vmedical-agent → macmini**, double-click
+   **`install.command`**. Wait for **“Done!”**
 
-The dashboard is now running on the Mac at `http://localhost:8000`, but we still
-need to give it a web address and turn on Google login before the team can use it.
+**✓ Check:** open `http://localhost:8000` — you should see a “Sign in with
+Google” screen (it won't log in until Stage 4; seeing it is the win).
 
----
+## Stage 2 — Get a web address (domain)
+1. Create a free account at `cloudflare.com` (used for the address *and* the
+   secure connection).
+2. **Domain Registration → Register Domain** → buy a name (~$10/yr).
+3. Pick your dashboard address, e.g. **`dashboard.yourspa.com`**.
 
-## Part 2 — Give it a secure web address (Cloudflare Tunnel)
+**✓ Check:** the domain appears in your Cloudflare account.
 
-This creates a private, secure `https://` address that points to the dashboard on
-the Mac — without opening up your internet router. It's free.
+## Stage 3 — Connect the address to the Mac, securely (Cloudflare Tunnel)
+1. In Cloudflare, open **Zero Trust** (`one.dash.cloudflare.com`). If prompted,
+   pick the **Free** plan and make up a team name.
+2. **Networks → Tunnels → Create a tunnel → Cloudflared → Next**.
+3. Name it `spa-dashboard` → **Save tunnel**.
+4. Choose **Mac**, copy the command shown, paste it into **Terminal** on the Mac,
+   press Return.
+   - If “command not found: cloudflared,” run these first, then paste the command
+     again:
+     ```
+     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+     brew install cloudflared
+     ```
+5. Wait until Cloudflare shows the connector **Connected** → **Next**.
+6. Add the **Public Hostname**:
+   - Subdomain: `dashboard`
+   - Domain: your domain (dropdown)
+   - Service Type: `HTTP`  ·  URL: `localhost:8000`
+   - **Save tunnel**.
 
-1. Create a free account at https://www.cloudflare.com and add a domain you own
-   (or buy a cheap one there, ~$10/yr). A subdomain like `spa.yourdomain.com`
-   will be the dashboard address.
-2. On the Mac Mini, install the Cloudflare tunnel tool. Open **Terminal** and
-   paste:
+**✓ Check:** on your phone, open `https://dashboard.yourspa.com` — you see the
+“Sign in with Google” screen. (This is the trickiest stage — send a screenshot if
+stuck.)
+
+## Stage 4 — Turn on Google Sign-in
+1. `console.cloud.google.com` → sign in with the spa's Google account.
+2. Project dropdown → **New Project** → name `Spa Dashboard` → create + select.
+3. Search **“OAuth consent screen”** → choose **Internal** (Workspace) or
+   **External** → fill app name + your email → Save/Continue to the end.
+4. Search **“Credentials”** → **Create Credentials → OAuth client ID**.
+5. Application type **Web application**. Under **Authorized redirect URIs**, add:
+   `https://dashboard.yourspa.com/auth/callback`  → **Create**.
+6. Copy the **Client ID** and **Client secret** (used in Stage 5).
+
+> Google's screens change often; look for **“OAuth consent screen”** and
+> **“Credentials.”** Send a screenshot if you get lost.
+
+## Stage 5 — Fill in the settings file
+1. In **macmini**, double-click **`open-settings.command`** — the `.env` file
+   opens in TextEdit.
+2. Fill in (leave the rest as-is):
    ```
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-   brew install cloudflared
-   ```
-   (The first line installs "Homebrew," a helper for installing tools. Follow any
-   on-screen prompts.)
-3. Connect it and create the tunnel:
-   ```
-   cloudflared tunnel login
-   cloudflared tunnel create spa-dashboard
-   cloudflared tunnel route dns spa-dashboard spa.yourdomain.com
-   ```
-4. Tell me your chosen address (e.g. `spa.yourdomain.com`) and I'll give you the
-   exact small config file + the command to keep the tunnel running automatically.
-   (It's a couple of lines; I kept it out of here so we use your real domain.)
-
-> **Why this step?** Google login and GoHighLevel both need a real `https://`
-> address to talk to. The tunnel provides that while keeping everything running
-> on your Mac.
-
----
-
-## Part 3 — Turn on Google Sign-in
-
-1. Go to https://console.cloud.google.com → create a project (name it "Spa
-   Dashboard").
-2. **APIs & Services → OAuth consent screen:** choose **Internal** (if the spa
-   uses Google Workspace) so only their team can sign in. Fill in the app name
-   and your email.
-3. **APIs & Services → Credentials → Create Credentials → OAuth client ID:**
-   - Application type: **Web application**
-   - **Authorized redirect URI:** `https://spa.yourdomain.com/auth/callback`
-     (use your real tunnel address from Part 2)
-   - Create it, then **copy the Client ID and Client Secret**.
-4. On the Mac, open the settings file and fill it in:
-   ```
-   open -e ~/Documents/vmedical-agent/.env
-   ```
-   Set these lines (use your real values):
-   ```
-   BASE_URL=https://spa.yourdomain.com
-   GOOGLE_CLIENT_ID=...(from step 3)...
-   GOOGLE_CLIENT_SECRET=...(from step 3)...
-   ALLOWED_EMAIL_DOMAIN=yourspadomain.com     # only these accounts can log in
-   SUPER_ADMIN_EMAIL=you@yourspadomain.com     # this is YOU (the owner)
-   SESSION_SECRET=...(run the command in the .env comments to generate one)...
-   ```
-5. Restart the app:
-   ```
-   launchctl unload ~/Library/LaunchAgents/com.vmedical-agent.plist
-   launchctl load ~/Library/LaunchAgents/com.vmedical-agent.plist
-   ```
-
-Now visit `https://spa.yourdomain.com` — you should get a **Sign in with Google**
-screen. Sign in with your own account: because your email is `SUPER_ADMIN_EMAIL`,
-you'll come in as **Super Admin**. Everyone else who signs in starts as a **Team
-Member**, and you can change their level on the **Team** page.
-
----
-
-## Part 4 — Point it at the Obsidian vault
-
-In the same `.env` file, set the vault folder path (find it in Obsidian →
-Manage vaults):
-```
-OBSIDIAN_VAULT_PATH=/Users/frontdesk/Documents/GlowMedSpaVault
-```
-Restart the app (same two commands as above). Call transcripts will now be filed
-under `vMedical Agent → Clients → <caller> → Calls` in the vault.
-
----
-
-## Part 5 — Connect the GoHighLevel after-hours calls
-
-We want GHL's AI receptionist to send each completed after-hours call to the
-dashboard.
-
-1. First, pick a webhook password and put it in `.env`:
-   ```
+   BASE_URL=https://dashboard.yourspa.com
+   GOOGLE_CLIENT_ID=...(Stage 4)...
+   GOOGLE_CLIENT_SECRET=...(Stage 4)...
+   ALLOWED_EMAIL_DOMAIN=yourspa.com
+   SUPER_ADMIN_EMAIL=you@yourspa.com
+   OBSIDIAN_VAULT_PATH=/Users/…/YourVault
    GHL_WEBHOOK_SECRET=some-long-made-up-password
    ```
-   Restart the app. Your webhook address is then:
-   ```
-   https://spa.yourdomain.com/webhook/ghl/call?secret=some-long-made-up-password
-   ```
-2. In GoHighLevel, in the **Workflow** that handles after-hours calls / the AI
-   receptionist, add a **Webhook** action:
-   - Method: **POST**
-   - URL: the address above
-   - Send the call fields — at minimum the **caller phone number** and the **call
-     transcript** (and the caller name and a call ID if available).
-3. Because every GHL setup names fields a little differently, do a test call and
-   then tell me — I'll confirm the field mapping so the caller name, phone, and
-   transcript land in the right place. The receiving end is already built and
-   secured; this is just matching your workflow's field names.
+   - `SESSION_SECRET` is already filled in by the installer — don't change it.
+   - Find `OBSIDIAN_VAULT_PATH` in Obsidian → vault name (bottom-left) →
+     **Manage vaults**.
+3. Save (⌘S). If TextEdit added formatting, use **Format → Make Plain Text**.
+4. Double-click **`restart.command`**. Wait ~10 seconds.
 
-**Test it yourself** any time with a fake call (paste into Terminal, using your
-real address + secret):
-```bash
-curl -X POST "https://spa.yourdomain.com/webhook/ghl/call?secret=some-long-made-up-password" \
-  -H "Content-Type: application/json" \
-  -d '{"phone":"902-555-0100","contact_name":"Test Caller","transcript":"Testing the after-hours line."}'
-```
-Then refresh the dashboard's **Messages** tab — the test call should appear as
-**New**, and a note should show up in Obsidian under that caller.
+## Stage 6 — First login (you become Super Admin)
+Go to `https://dashboard.yourspa.com` → **Sign in with Google** → use your own
+spa email (the `SUPER_ADMIN_EMAIL`).
 
----
+**✓ Check:** you see **Home / Messages / Team**, with **Super Admin** by your
+name. If “Only … accounts can sign in,” fix `ALLOWED_EMAIL_DOMAIN` (Stage 5) and
+restart.
 
-## The three access levels
+## Stage 7 — Add the team
+1. Each team member signs in with Google once (they start as Team Member).
+2. On the **Team** page, set each person's access level and **Save**.
 
-| Level          | Can do                                                              |
-|----------------|--------------------------------------------------------------------|
-| **Super Admin**| Everything, including managing all team members and settings.       |
-| **Spa Manager**| See/respond to messages; manage Team Members (not other admins).    |
-| **Team Member**| See and respond to phone messages.                                  |
+Access levels: **Super Admin** (everything), **Spa Manager** (messages + manage
+Team Members), **Team Member** (see/respond to messages).
 
-New people appear on the **Team** page automatically after they sign in once;
-a Super Admin or Spa Manager sets their level there. (We'll attach more sections
-to these levels as we add features.)
+## Stage 8 — Connect GoHighLevel after-hours calls
+1. Your webhook address:
+   `https://dashboard.yourspa.com/webhook/ghl/call?secret=YOUR-PASSWORD`
+   (the password is your `GHL_WEBHOOK_SECRET`).
+2. In GHL's after-hours / AI-receptionist workflow, add a **Webhook** action
+   (POST) to that URL, sending at least the caller **phone** and **transcript**
+   (plus name + call id if available).
+3. Make a **test call**, then send Claude what came through so the field mapping
+   can be confirmed.
+
+**✓ Check:** the test call shows as **New** in **Messages**, and a note appears
+in Obsidian under **vMedical Agent → Clients → (caller) → Calls**.
 
 ---
 
-## Everyday commands (Terminal on the Mac Mini)
-
-| I want to...          | Do this                                                                 |
-|-----------------------|-------------------------------------------------------------------------|
-| Restart the dashboard | `launchctl unload ~/Library/LaunchAgents/com.vmedical-agent.plist && launchctl load ~/Library/LaunchAgents/com.vmedical-agent.plist` |
-| Change settings       | `open -e ~/Documents/vmedical-agent/.env`  (restart after)              |
-| See the app log       | `open ~/Documents/vmedical-agent/data/app.log`                          |
+## Everyday helpers
+- Change settings: double-click **`open-settings.command`**, then
+  **`restart.command`**.
+- App log (if something seems off): `~/Documents/vmedical-agent/data/app.log`.
 
 ## Backups
-- The **Obsidian vault** is just a folder — back it up (Time Machine / a copy).
-- The dashboard's data is in `~/Documents/vmedical-agent/data/app.db`.
+- The **Obsidian vault** is a folder — back it up (Time Machine / a copy).
+- Dashboard data: `~/Documents/vmedical-agent/data/app.db`.
 
 ## Keep the Mac always on
-- The app keeps the Mac awake while running. For extra safety, **System Settings
-  → Users & Groups → Automatically log in** as the front-desk account, so it
-  comes back on its own after a power cut.
-
----
-
-## Stuck?
-Tell me which part number you're on and what you saw on screen — especially for
-the Cloudflare Tunnel and Google steps, where I can hand you the exact lines for
-your real domain.
+**System Settings → Users & Groups → Automatically log in** as the front-desk
+account, so the dashboard comes back on its own after a power cut. (The app keeps
+the Mac awake while running.)

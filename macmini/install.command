@@ -38,14 +38,20 @@ python3 -m venv .venv
 # 3. Create the settings file if it's missing.
 if [ ! -f .env ]; then
     cp .env.example .env
-    echo "==> Created a settings file (.env)."
-    echo "    IMPORTANT: open it and set OBSIDIAN_VAULT_PATH to this client's"
-    echo "    Obsidian vault folder. You can do that now or later:"
-    echo "      open -e \"$APP_DIR/.env\""
+    # Auto-generate a strong SESSION_SECRET so you never have to.
+    SECRET="$(./.venv/bin/python -c 'import secrets; print(secrets.token_hex(32))')"
+    ./.venv/bin/python - "$APP_DIR/.env" "$SECRET" <<'PY'
+import re, sys
+path, secret = sys.argv[1], sys.argv[2]
+text = open(path).read()
+text = re.sub(r'(?m)^SESSION_SECRET=.*$', 'SESSION_SECRET=' + secret, text)
+open(path, 'w').write(text)
+PY
+    echo "==> Created a settings file (.env) with a secure key already filled in."
 fi
 
-# 4. Make the start script runnable.
-chmod +x macmini/start.sh
+# 4. Make the helper scripts runnable.
+chmod +x macmini/start.sh macmini/restart.command macmini/open-settings.command 2>/dev/null || true
 
 # 5. Install the background service (a macOS "LaunchAgent").
 echo "==> Setting the app to run automatically..."
