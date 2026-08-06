@@ -50,6 +50,14 @@ def write_call_transcript(
     """
     if not VAULT_PATH:
         return None
+    # Don't try to create the whole path from the filesystem root if the vault
+    # folder itself is missing (e.g. the path is still the placeholder) — that
+    # would fail with a confusing permission error.
+    if not Path(VAULT_PATH).exists():
+        raise FileNotFoundError(
+            f"Obsidian vault folder not found: {VAULT_PATH} "
+            "(check OBSIDIAN_VAULT_PATH in .env)"
+        )
 
     folder = _client_folder(phone, caller_name) / "Calls"
     folder.mkdir(parents=True, exist_ok=True)

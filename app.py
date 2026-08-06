@@ -261,10 +261,14 @@ async def ghl_call_webhook(request: Request):
     ghl_call_id = _field(payload, "call_id", "id", "messageId", "message_id")
 
     client = db.get_or_create_client(phone, name)
-    vault_file = obsidian.write_call_transcript(
-        phone=phone, transcript=transcript, caller_name=name,
-        summary=summary, duration=duration,
-    )
+    vault_file = None
+    try:
+        vault_file = obsidian.write_call_transcript(
+            phone=phone, transcript=transcript, caller_name=name,
+            summary=summary, duration=duration,
+        )
+    except Exception:  # noqa: BLE001 - vault issue must not drop the message
+        pass
     try:
         message_id = db.add_message(
             client_id=client["id"],

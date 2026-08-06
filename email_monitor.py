@@ -214,11 +214,17 @@ def poll_once() -> int:
             fields = parse_recap(subject, body)
 
             client = db.get_or_create_client(fields["phone"], fields["name"])
-            vault_file = obsidian.write_call_transcript(
-                phone=fields["phone"], transcript=fields["transcript"],
-                caller_name=fields["name"], summary=fields["summary"],
-                duration=fields["duration"],
-            )
+            # Writing to Obsidian is secondary — never let a vault problem stop
+            # the call from reaching the dashboard.
+            vault_file = None
+            try:
+                vault_file = obsidian.write_call_transcript(
+                    phone=fields["phone"], transcript=fields["transcript"],
+                    caller_name=fields["name"], summary=fields["summary"],
+                    duration=fields["duration"],
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[email_monitor] Obsidian write skipped: {exc}")
             try:
                 db.add_message(
                     client_id=client["id"],
@@ -231,7 +237,7 @@ def poll_once() -> int:
                 saved += 1
             except Exception:  # noqa: BLE001 - already saved (duplicate Message-ID)
                 pass
-            # Mark as read so we don't process it again.
+            # Mark as read so we don't process it again (even if Obsidian failed).
             imap.store(num, "+FLAGS", "\\Seen")
     finally:
         try:
