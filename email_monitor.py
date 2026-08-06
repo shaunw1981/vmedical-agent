@@ -201,7 +201,10 @@ def poll_once() -> int:
         typ, data = imap.search(None, "UNSEEN", "FROM", config.RECAP_FROM)
         ids = data[0].split() if data and data[0] else []
         for num in ids:
-            typ, msg_data = imap.fetch(num, "(RFC822)")
+            # BODY.PEEK reads the email WITHOUT marking it read — we only mark
+            # it read ourselves after it's been saved, so a transient error
+            # never silently consumes an email.
+            typ, msg_data = imap.fetch(num, "(BODY.PEEK[])")
             if typ != "OK" or not msg_data or not msg_data[0]:
                 continue
             msg = email.message_from_bytes(msg_data[0][1])
