@@ -1,214 +1,209 @@
-# Setting up vmedical-agent on the Mac Mini
+# Spa Dashboard — Setup guide (Build #1)
 
-A step-by-step guide written for **non-developers**. By the end, the Mac Mini at
-the spa will quietly capture voicemail and appointment notes from GoHighLevel
-and file them into the client's **Obsidian vault** — all stored locally on that
-Mac.
+A step-by-step guide written for **non-developers**. By the end you'll have a
+team **dashboard** running on the Mac Mini, that the team logs into with
+**Google**, showing an **after-hours phone-message inbox**. Each call from
+GoHighLevel's AI receptionist is filed into the client's **Obsidian** record and
+shown in the dashboard to mark "responded."
 
-**Roughly how long:** 30–45 minutes.
-**What it costs:** nothing extra (it's your own Mac). Optional AI tidy-up uses
-Anthropic and is off by default.
+There are three access levels: **Super Admin**, **Spa Manager**, **Team Member**.
+
+> This is the first build. Client records, in-person consult notes (Granola), and
+> more agents will be added as new sections later — the foundation is built for it.
+
+**Time:** about an hour the first time (most of it is the Google + web-address
+setup, which you only do once).
 
 ---
 
-## How it all fits together (the big picture)
+## The big picture
 
 ```
-  GoHighLevel  ─▶  vmedical-agent  ─▶  Obsidian vault  ─▶  Staff read notes
-  (voicemails,     (runs on the         (a folder of         in Obsidian
-   appointments)   Mac Mini)            Markdown files)
+  GoHighLevel AI receptionist ─▶ Dashboard (on the Mac Mini) ─▶ Obsidian vault
+        (after-hours calls)         team logs in with Google        (the brain)
+                                     sees + responds to messages
 ```
 
-- **The Mac Mini** is the always-on computer that runs the little app.
-- **Obsidian** is the "brain" — every note becomes a text file in the vault, so
-  staff can read, search, and link them.
-- **Everything stays on the Mac.** Nothing is stored in the cloud. (The only
-  thing that could ever leave is if you turn on optional AI tidy-up — see the
-  end of this guide. It's off by default.)
+Everything runs and is stored on the Mac Mini. A secure "tunnel" gives it a
+private web address so the team can log in from anywhere and GoHighLevel can send
+calls in.
+
+We'll do this in five parts:
+1. Put the project on the Mac and install it.
+2. Give it a secure web address (Cloudflare Tunnel).
+3. Turn on Google Sign-in.
+4. Point it at the Obsidian vault.
+5. Connect the GoHighLevel after-hours calls.
 
 ---
 
-## Before you start
+## Part 1 — Install on the Mac Mini
 
-You'll need, on the Mac Mini:
+1. Make sure **Python 3** is installed (if not, get it from
+   https://www.python.org/downloads/ and run the installer).
+2. Download the project: on GitHub, green **Code** button → **Download ZIP**.
+   Unzip it into **Documents** and rename the folder to `vmedical-agent`.
+3. Open the `vmedical-agent/macmini` folder and **double-click `install.command`**.
+   - If macOS blocks it: **right-click → Open → Open** (once).
+   - It sets everything up and makes the dashboard start automatically.
 
-1. **Obsidian installed**, with the client's vault already opened once so the
-   folder exists. To find the vault's folder path later: open Obsidian → click
-   the vault name at the bottom-left → **Manage vaults** → it shows the folder.
-2. **Python 3** installed. If it's not, download the macOS installer from
-   https://www.python.org/downloads/ , run it, and click through the defaults.
-3. About 30 minutes.
-
----
-
-## Part 1 — Put the project on the Mac Mini
-
-The simplest way, no developer tools needed:
-
-1. Go to the project on GitHub:
-   `https://github.com/shaunw1981/vmedical-agent`
-2. Click the green **Code** button → **Download ZIP**.
-3. Open the downloaded ZIP (it unzips to a folder like `vmedical-agent-main`).
-4. Move that folder somewhere sensible, e.g. into **Documents**. Rename it to
-   `vmedical-agent` if you like.
+The dashboard is now running on the Mac at `http://localhost:8000`, but we still
+need to give it a web address and turn on Google login before the team can use it.
 
 ---
 
-## Part 2 — Run the installer (one double-click)
+## Part 2 — Give it a secure web address (Cloudflare Tunnel)
 
-1. Open the project folder, then open the **`macmini`** folder inside it.
-2. **Double-click `install.command`.**
-   - If macOS blocks it with *"cannot be opened because it is from an
-     unidentified developer,"* **right-click** the file → **Open** → **Open**.
-     (You only need to do this once.)
-3. A black window opens and sets everything up. When it finishes it prints a
-   **"Done!"** message. You can close the window.
+This creates a private, secure `https://` address that points to the dashboard on
+the Mac — without opening up your internet router. It's free.
 
-The installer also set the app to **start automatically** and keep running —
-even after the Mac restarts.
+1. Create a free account at https://www.cloudflare.com and add a domain you own
+   (or buy a cheap one there, ~$10/yr). A subdomain like `spa.yourdomain.com`
+   will be the dashboard address.
+2. On the Mac Mini, install the Cloudflare tunnel tool. Open **Terminal** and
+   paste:
+   ```
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   brew install cloudflared
+   ```
+   (The first line installs "Homebrew," a helper for installing tools. Follow any
+   on-screen prompts.)
+3. Connect it and create the tunnel:
+   ```
+   cloudflared tunnel login
+   cloudflared tunnel create spa-dashboard
+   cloudflared tunnel route dns spa-dashboard spa.yourdomain.com
+   ```
+4. Tell me your chosen address (e.g. `spa.yourdomain.com`) and I'll give you the
+   exact small config file + the command to keep the tunnel running automatically.
+   (It's a couple of lines; I kept it out of here so we use your real domain.)
+
+> **Why this step?** Google login and GoHighLevel both need a real `https://`
+> address to talk to. The tunnel provides that while keeping everything running
+> on your Mac.
 
 ---
 
-## Part 3 — Point it at the Obsidian vault
+## Part 3 — Turn on Google Sign-in
 
-The app needs to know which folder is the client's vault.
-
-1. Open the settings file. In the Terminal window (or a new one), or via Finder,
-   open the file called **`.env`** in the project folder. Easiest way — run:
+1. Go to https://console.cloud.google.com → create a project (name it "Spa
+   Dashboard").
+2. **APIs & Services → OAuth consent screen:** choose **Internal** (if the spa
+   uses Google Workspace) so only their team can sign in. Fill in the app name
+   and your email.
+3. **APIs & Services → Credentials → Create Credentials → OAuth client ID:**
+   - Application type: **Web application**
+   - **Authorized redirect URI:** `https://spa.yourdomain.com/auth/callback`
+     (use your real tunnel address from Part 2)
+   - Create it, then **copy the Client ID and Client Secret**.
+4. On the Mac, open the settings file and fill it in:
    ```
    open -e ~/Documents/vmedical-agent/.env
    ```
-   (adjust the path if you put the folder elsewhere).
-2. Find this line:
+   Set these lines (use your real values):
    ```
-   OBSIDIAN_VAULT_PATH=/Users/USERNAME/Documents/SpaVault
+   BASE_URL=https://spa.yourdomain.com
+   GOOGLE_CLIENT_ID=...(from step 3)...
+   GOOGLE_CLIENT_SECRET=...(from step 3)...
+   ALLOWED_EMAIL_DOMAIN=yourspadomain.com     # only these accounts can log in
+   SUPER_ADMIN_EMAIL=you@yourspadomain.com     # this is YOU (the owner)
+   SESSION_SECRET=...(run the command in the .env comments to generate one)...
    ```
-   Replace it with the **real vault folder path** from Obsidian (the one you
-   found in "Before you start"). For example:
-   ```
-   OBSIDIAN_VAULT_PATH=/Users/frontdesk/Documents/GlowMedSpaVault
-   ```
-3. Save the file (Cmd+S) and close it.
-4. Restart the app so it picks up the change. Copy-paste this into Terminal:
+5. Restart the app:
    ```
    launchctl unload ~/Library/LaunchAgents/com.vmedical-agent.plist
    launchctl load ~/Library/LaunchAgents/com.vmedical-agent.plist
    ```
 
+Now visit `https://spa.yourdomain.com` — you should get a **Sign in with Google**
+screen. Sign in with your own account: because your email is `SUPER_ADMIN_EMAIL`,
+you'll come in as **Super Admin**. Everyone else who signs in starts as a **Team
+Member**, and you can change their level on the **Team** page.
+
 ---
 
-## Part 4 — Test that it works
+## Part 4 — Point it at the Obsidian vault
 
-**1. Open the notes page.** In a browser on the Mac Mini, go to:
+In the same `.env` file, set the vault folder path (find it in Obsidian →
+Manage vaults):
 ```
-http://localhost:8000
+OBSIDIAN_VAULT_PATH=/Users/frontdesk/Documents/GlowMedSpaVault
 ```
-You should see a "Spa Notes" page (empty for now).
+Restart the app (same two commands as above). Call transcripts will now be filed
+under `vMedical Agent → Clients → <caller> → Calls` in the vault.
 
-**2. Add a test note.** Paste this into Terminal:
+---
+
+## Part 5 — Connect the GoHighLevel after-hours calls
+
+We want GHL's AI receptionist to send each completed after-hours call to the
+dashboard.
+
+1. First, pick a webhook password and put it in `.env`:
+   ```
+   GHL_WEBHOOK_SECRET=some-long-made-up-password
+   ```
+   Restart the app. Your webhook address is then:
+   ```
+   https://spa.yourdomain.com/webhook/ghl/call?secret=some-long-made-up-password
+   ```
+2. In GoHighLevel, in the **Workflow** that handles after-hours calls / the AI
+   receptionist, add a **Webhook** action:
+   - Method: **POST**
+   - URL: the address above
+   - Send the call fields — at minimum the **caller phone number** and the **call
+     transcript** (and the caller name and a call ID if available).
+3. Because every GHL setup names fields a little differently, do a test call and
+   then tell me — I'll confirm the field mapping so the caller name, phone, and
+   transcript land in the right place. The receiving end is already built and
+   secured; this is just matching your workflow's field names.
+
+**Test it yourself** any time with a fake call (paste into Terminal, using your
+real address + secret):
 ```bash
-curl -X POST http://localhost:8000/api/notes \
+curl -X POST "https://spa.yourdomain.com/webhook/ghl/call?secret=some-long-made-up-password" \
   -H "Content-Type: application/json" \
-  -d '{"note_type":"voicemail","caller_name":"Test Caller","caller_phone":"902-555-0000","raw_text":"Just testing the system"}'
+  -d '{"phone":"902-555-0100","contact_name":"Test Caller","transcript":"Testing the after-hours line."}'
 ```
-
-**3. Check both places:**
-- Refresh `http://localhost:8000` — the test note should appear.
-- Open **Obsidian** — inside the vault you'll now see a folder
-  **`vMedical Agent → Voicemails`** with a note file for the test caller. 🎉
-
-That confirms the whole chain works and notes are landing in the brain.
+Then refresh the dashboard's **Messages** tab — the test call should appear as
+**New**, and a note should show up in Obsidian under that caller.
 
 ---
 
-## Part 5 — Connecting GoHighLevel
+## The three access levels
 
-This is the step that makes real voicemails/appointments flow in. Because the
-Mac Mini sits behind the spa's internet router, the reliable approach is to have
-the Mac **pull** from GoHighLevel on a schedule (rather than GHL pushing in).
+| Level          | Can do                                                              |
+|----------------|--------------------------------------------------------------------|
+| **Super Admin**| Everything, including managing all team members and settings.       |
+| **Spa Manager**| See/respond to messages; manage Team Members (not other admins).    |
+| **Team Member**| See and respond to phone messages.                                  |
 
-You'll need two things from GoHighLevel:
-
-1. **An API token** — in GoHighLevel: **Settings → (Private) Integrations →
-   create one**, and copy the token.
-2. **Your Location ID** — in GoHighLevel: **Settings → Business Info**, or the
-   long ID in the web address when you're in that sub-account.
-
-Put both into the `.env` file:
-```
-GHL_API_TOKEN=your-token-here
-GHL_LOCATION_ID=your-location-id-here
-```
-
-Then tell me you've done this, and I'll finish wiring the pull so it runs
-automatically every few minutes. (The connector is already built — it just
-needs your account's exact settings confirmed, which is safest to do together.)
-
-> Prefer GoHighLevel to send notes the moment a voicemail lands? That's also
-> possible using a GHL "Webhook" action pointing at the app — but it needs a
-> secure tunnel so the outside world can reach the Mac. The pull method above is
-> simpler and needs no tunnel, so start there.
+New people appear on the **Team** page automatically after they sign in once;
+a Super Admin or Spa Manager sets their level there. (We'll attach more sections
+to these levels as we add features.)
 
 ---
 
-## Part 6 — Keep the Mac Mini always on
+## Everyday commands (Terminal on the Mac Mini)
 
-So notes keep flowing even if no one's touching the Mac:
-
-1. **Prevent sleep:** the app already keeps the Mac awake while it runs (no
-   setting needed). For belt-and-suspenders, go to **System Settings → Displays
-   → Advanced** (or **Energy**) and turn on *"Prevent automatic sleeping when
-   the display is off."*
-2. **Auto-login after a power cut:** **System Settings → Users & Groups →
-   Automatically log in as →** the front-desk account. This ensures the app
-   comes back on its own if the Mac restarts.
-
----
-
-## Everyday commands (bookmark these)
-
-Run these in the **Terminal** app on the Mac Mini:
-
-| I want to...                     | Do this                                                        |
-|----------------------------------|----------------------------------------------------------------|
-| See the notes                    | Open `http://localhost:8000` (or just use Obsidian)            |
-| Restart the app                  | `launchctl unload ~/Library/LaunchAgents/com.vmedical-agent.plist && launchctl load ~/Library/LaunchAgents/com.vmedical-agent.plist` |
-| Change settings                  | `open -e ~/Documents/vmedical-agent/.env` (restart after)     |
-| See the app's log                | `open ~/Documents/vmedical-agent/data/app.log`                |
-
----
+| I want to...          | Do this                                                                 |
+|-----------------------|-------------------------------------------------------------------------|
+| Restart the dashboard | `launchctl unload ~/Library/LaunchAgents/com.vmedical-agent.plist && launchctl load ~/Library/LaunchAgents/com.vmedical-agent.plist` |
+| Change settings       | `open -e ~/Documents/vmedical-agent/.env`  (restart after)              |
+| See the app log       | `open ~/Documents/vmedical-agent/data/app.log`                          |
 
 ## Backups
+- The **Obsidian vault** is just a folder — back it up (Time Machine / a copy).
+- The dashboard's data is in `~/Documents/vmedical-agent/data/app.db`.
 
-Two easy things keep you safe:
-- The **Obsidian vault** is just a folder — back it up like any folder (Time
-  Machine, iCloud, a copy to a USB drive).
-- The app also keeps a copy in `data/notes.db` inside the project folder.
-
----
-
-## Optional — AI tidy-up (off by default)
-
-Voicemail transcripts can be messy. The app can have Claude rewrite them into
-clean, short notes ("Jane called to move her Thursday facial; callback
-902-555-0100"). **This is the one feature that sends text off the Mac** (to
-Anthropic), so it's **off by default** to keep everything local.
-
-To turn it on, edit `.env`:
-```
-AI_CLEANUP=on
-ANTHROPIC_API_KEY=sk-ant-your-key-here     # from https://console.anthropic.com
-```
-Then restart the app. Leave `AI_CLEANUP=off` to keep every note 100% local.
+## Keep the Mac always on
+- The app keeps the Mac awake while running. For extra safety, **System Settings
+  → Users & Groups → Automatically log in** as the front-desk account, so it
+  comes back on its own after a power cut.
 
 ---
 
-## If something's not working
-
-- **Notes page won't open** → give it a minute after install; the app may still
-  be starting. Check the log: `open ~/Documents/vmedical-agent/data/app.log`.
-- **Notes save but don't appear in Obsidian** → the `OBSIDIAN_VAULT_PATH` in
-  `.env` is probably wrong. Re-copy the exact folder path from Obsidian's
-  "Manage vaults," fix `.env`, and restart the app.
-- **Stuck on any step** → tell me the step number and what you saw, and I'll
-  walk you through it.
+## Stuck?
+Tell me which part number you're on and what you saw on screen — especially for
+the Cloudflare Tunnel and Google steps, where I can hand you the exact lines for
+your real domain.

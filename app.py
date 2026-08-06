@@ -1,235 +1,271 @@
 """
-vmedical-agent — a small notes app that runs on the Mac Mini at the spa.
+vmedical-agent — the team dashboard (Build #1).
 
-What it does:
-  * Receives voicemail notes and appointment notes (from GoHighLevel, or added
-    by hand) and stores them LOCALLY on this Mac in a single database file.
-  * Shows staff a simple web page to read the notes, at an address on the
-    spa's own network (e.g. http://localhost:8000).
+Runs on the Mac Mini. The team signs in with Google, and (based on their role:
+Super Admin / Spa Manager / Team Member) sees the after-hours phone-message
+inbox. GoHighLevel's AI receptionist posts call transcripts to /webhook/ghl/call;
+each one is filed into the Obsidian vault under the caller's number and shown in
+the inbox for the team to mark "responded."
 
-What it does NOT do:
-  * It does not send your stored notes to any cloud. Storage is 100% local.
-  * The ONE exception is optional "AI tidy-up" (off by default): if you turn it
-    on, the *text of a voicemail* is sent to Anthropic to be rewritten into a
-    clean note. Leave it off to keep everything fully local. See .env.example.
-
-You normally don't run this by hand — the Mac Mini setup starts it
-automatically. See SETUP-MACMINI.md.
+See SETUP-MACMINI.md for how to run it and connect Google + GoHighLevel.
 """
 
-import os
+import sqlite3
+from pathlib import Path
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
-import notes_db
+import auth
+import config
+import db
 import obsidian
 
-load_dotenv()
+app = FastAPI(title="vmedical-agent dashboard", version="3.0.0")
+app.add_middleware(SessionMiddleware, secret_key=config.SESSION_SECRET)
 
-# --- Optional AI tidy-up (OFF by default to keep everything local) -----------
-# Set AI_CLEANUP=on in .env to have Claude rewrite messy voicemail transcripts
-# into clean notes. When on, that text is sent to Anthropic. When off, notes are
-# stored exactly as received and nothing leaves the Mac.
-AI_CLEANUP = os.environ.get("AI_CLEANUP", "off").lower() == "on"
-MODEL = os.environ.get("MODEL", "claude-sonnet-5")
-
-_anthropic_client = None
-if AI_CLEANUP:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if api_key:
-        from anthropic import Anthropic
-
-        _anthropic_client = Anthropic(api_key=api_key)
-
-
-def _tidy(raw_text: str) -> str | None:
-    """Turn a messy transcript into a clean note. Returns None if unavailable."""
-    if not _anthropic_client:
-        return None
-    try:
-        result = _anthropic_client.messages.create(
-            model=MODEL,
-            max_tokens=400,
-            system=(
-                "You clean up voicemail transcripts for a spa's front desk. "
-                "Rewrite the message into a short, clear note: who called, why, "
-                "any callback number, and any requested action. Keep it factual "
-                "and brief. Do not invent details."
-            ),
-            messages=[{"role": "user", "content": raw_text}],
-        )
-        return result.content[0].text
-    except Exception:  # noqa: BLE001 - never let tidy-up break saving a note
-        return None
-
-
-app = FastAPI(title="vmedical-agent (local notes)", version="2.0.0")
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+# Make role/permission helpers available inside every template.
+templates.env.globals.update(
+    can=config.can, ROLE_LABELS=config.ROLE_LABELS, ROLES=config.ROLES
+)
 
 
 @app.on_event("startup")
 def _startup() -> None:
-    notes_db.init_db()
+    db.init_db()
 
 
-def _save_note(
-    note_type: str,
-    raw_text: str,
-    caller_name: str | None,
-    caller_phone: str | None,
-    source: str,
-) -> dict:
+def _ctx(request: Request, user: dict, **extra) -> dict:
+    """Shared template context (adds nav data like the unread count)."""
+    base = {
+        "request": request,
+        "user": user,
+        "new_count": db.count_new_messages(),
+        "obsidian_ok": obsidian.is_configured(),
+    }
+    base.update(extra)
+    return base
+
+
+def _guard(request: Request, capability: str | None = None):
     """
-    Save a note everywhere it should go:
-      1. Tidy it up with Claude (only if AI_CLEANUP=on).
-      2. Write it into the Obsidian vault (the brain), if configured.
-      3. Keep a local database copy as a reliable backup/log.
+    Returns (user, response). If response is not None, the route should return it
+    (a redirect to login, or a 403 page). Otherwise user is the logged-in person.
     """
-    clean = _tidy(raw_text) if note_type == "voicemail" else None
-    body = clean or raw_text
-
-    vault_path = obsidian.write_note(
-        note_type=note_type,
-        body=body,
-        caller_name=caller_name,
-        caller_phone=caller_phone,
-        source=source,
-    )
-
-    note_id = notes_db.add_note(
-        note_type=note_type,
-        raw_text=raw_text,
-        caller_name=caller_name,
-        caller_phone=caller_phone,
-        clean_text=clean,
-        source=source,
-    )
-    return {"id": note_id, "status": "saved", "obsidian_file": vault_path}
+    user = auth.current_user(request)
+    if not user:
+        return None, RedirectResponse("/login", status_code=303)
+    if capability and not config.can(user["role"], capability):
+        return user, templates.TemplateResponse(
+            "403.html", _ctx(request, user), status_code=403
+        )
+    return user, None
 
 
-# --- Data shapes -------------------------------------------------------------
-class NoteIn(BaseModel):
-    note_type: str = "voicemail"       # "voicemail" or "appointment"
-    raw_text: str
-    caller_name: str | None = None
-    caller_phone: str | None = None
-    source: str = "manual"
-
-
-# --- Health + simple viewer --------------------------------------------------
+# --- Health ------------------------------------------------------------------
 @app.get("/health")
 def health():
-    return {"status": "ok", "ai_cleanup": AI_CLEANUP}
+    return {
+        "status": "ok",
+        "google_login": auth.google_configured(),
+        "obsidian": obsidian.is_configured(),
+    }
 
 
-@app.get("/", response_class=HTMLResponse)
-def viewer():
-    """A plain, readable page of recent notes for the front desk."""
-    notes = notes_db.list_notes()
-    rows = []
-    for n in notes:
-        body = n["clean_text"] or n["raw_text"] or ""
-        who = n["caller_name"] or "Unknown"
-        phone = f" &middot; {n['caller_phone']}" if n["caller_phone"] else ""
-        rows.append(
-            f"<tr><td>{n['created_at']}</td>"
-            f"<td><span class='tag'>{n['note_type']}</span></td>"
-            f"<td><strong>{who}</strong>{phone}<br>{body}</td>"
-            f"<td>{n['source']}</td></tr>"
+# --- Auth --------------------------------------------------------------------
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    if auth.current_user(request):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(
+        "login.html",
+        {"request": request, "google_ok": auth.google_configured()},
+    )
+
+
+@app.get("/auth/google")
+async def auth_google(request: Request):
+    if not auth.google_configured():
+        return RedirectResponse("/login", status_code=303)
+    redirect_uri = f"{config.BASE_URL}/auth/callback"
+    return await auth.oauth.google.authorize_redirect(request, redirect_uri)
+
+
+@app.get("/auth/callback")
+async def auth_callback(request: Request):
+    try:
+        token = await auth.oauth.google.authorize_access_token(request)
+        userinfo = token.get("userinfo") or await auth.oauth.google.userinfo(token=token)
+        user = auth.process_google_userinfo(dict(userinfo))
+    except auth.LoginError as exc:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "google_ok": True, "error": str(exc)},
+            status_code=403,
         )
-    table = "".join(rows) or (
-        "<tr><td colspan='4' style='text-align:center;color:#888'>"
-        "No notes yet.</td></tr>"
-    )
-    return f"""
-    <html><head><title>Spa Notes</title>
-    <meta http-equiv="refresh" content="30">
-    <style>
-      body {{ font-family: -apple-system, Arial, sans-serif; margin: 2rem;
-              color: #222; }}
-      h1 {{ font-size: 1.4rem; }}
-      table {{ border-collapse: collapse; width: 100%; }}
-      td, th {{ border-bottom: 1px solid #eee; padding: .6rem; text-align: left;
-                vertical-align: top; }}
-      th {{ color: #666; font-size: .8rem; text-transform: uppercase; }}
-      .tag {{ background: #eef; border-radius: 4px; padding: .1rem .4rem;
-              font-size: .8rem; }}
-    </style></head>
-    <body>
-      <h1>Spa Notes <span style="font-weight:normal;color:#888;font-size:.9rem">
-        (this page updates every 30 seconds)</span></h1>
-      <table>
-        <tr><th>When</th><th>Type</th><th>Note</th><th>Source</th></tr>
-        {table}
-      </table>
-    </body></html>
-    """
+    except Exception:  # noqa: BLE001
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "google_ok": True,
+             "error": "Sign-in failed. Please try again."},
+            status_code=400,
+        )
+
+    request.session["user"] = {"email": user["email"]}
+    return RedirectResponse("/", status_code=303)
 
 
-# --- Ways notes come in ------------------------------------------------------
-@app.post("/api/notes")
-def create_note(note: NoteIn):
-    """Add a note directly (used for testing, or a manual entry form)."""
-    return _save_note(
-        note_type=note.note_type,
-        raw_text=note.raw_text,
-        caller_name=note.caller_name,
-        caller_phone=note.caller_phone,
-        source=note.source,
+@app.get("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/login", status_code=303)
+
+
+# --- Dashboard ---------------------------------------------------------------
+@app.get("/", response_class=HTMLResponse)
+def dashboard(request: Request):
+    user, resp = _guard(request)
+    if resp:
+        return resp
+    return templates.TemplateResponse(
+        "dashboard.html",
+        _ctx(request, user, responded_count=len(db.list_messages("responded"))),
     )
 
 
-@app.get("/api/notes")
-def get_notes():
-    """Return notes as data (for backups or other tools)."""
-    return notes_db.list_notes()
+# --- Message inbox -----------------------------------------------------------
+@app.get("/messages", response_class=HTMLResponse)
+def messages_inbox(request: Request, status: str = "new"):
+    user, resp = _guard(request, "view_messages")
+    if resp:
+        return resp
+    status_filter = None if status == "all" else status
+    return templates.TemplateResponse(
+        "messages.html",
+        _ctx(
+            request, user,
+            messages=db.list_messages(status_filter),
+            active_filter=status,
+        ),
+    )
 
 
-@app.get("/api/history")
-def client_history(q: str):
+@app.post("/messages/{message_id}/respond")
+def respond_message(request: Request, message_id: int):
+    user, resp = _guard(request, "respond_messages")
+    if resp:
+        return resp
+    db.mark_message_responded(message_id, user["email"])
+    return RedirectResponse("/messages", status_code=303)
+
+
+# --- Team management (Super Admin / Spa Manager) -----------------------------
+def _may_manage(actor: dict, target: dict) -> bool:
+    """A Spa Manager can manage Team Members only; Super Admin can manage anyone."""
+    if actor["role"] == "super_admin":
+        return True
+    if actor["role"] == "spa_manager":
+        return target["role"] == "team_member"
+    return False
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+def users_page(request: Request):
+    user, resp = _guard(request, "manage_users")
+    if resp:
+        return resp
+    return templates.TemplateResponse(
+        "admin_users.html", _ctx(request, user, users=db.list_users())
+    )
+
+
+@app.post("/admin/users/role")
+def change_role(request: Request, email: str = Form(...), role: str = Form(...)):
+    actor, resp = _guard(request, "manage_users")
+    if resp:
+        return resp
+    target = db.get_user_by_email(email)
+    if target and role in config.ROLES and _may_manage(actor, target):
+        # A Spa Manager may never promote someone to Super Admin.
+        if actor["role"] == "super_admin" or role == "team_member":
+            db.set_user_role(email, role)
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/users/active")
+def toggle_active(request: Request, email: str = Form(...), active: str = Form(...)):
+    actor, resp = _guard(request, "manage_users")
+    if resp:
+        return resp
+    target = db.get_user_by_email(email)
+    # No one can disable their own account (avoid locking yourself out).
+    if target and _may_manage(actor, target) and target["email"] != actor["email"]:
+        db.set_user_active(email, active == "true")
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+# --- GoHighLevel webhook: after-hours call transcripts -----------------------
+@app.post("/webhook/ghl/call")
+async def ghl_call_webhook(request: Request):
     """
-    Look up a client's past notes from the Obsidian vault by name or phone.
-    This is how an agent can pull context on a returning caller.
+    GoHighLevel's AI receptionist posts a completed call here. Protected by a
+    shared secret (set GHL_WEBHOOK_SECRET and include it as ?secret=... or the
+    X-Webhook-Secret header). Field names vary by GHL setup, so we look for the
+    common ones and keep the whole payload as the transcript if unsure.
     """
-    return {"query": q, "matches": obsidian.find_notes(q)}
+    if config.GHL_WEBHOOK_SECRET:
+        provided = request.query_params.get("secret") or request.headers.get(
+            "x-webhook-secret", ""
+        )
+        if provided != config.GHL_WEBHOOK_SECRET:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
 
-
-@app.post("/webhook/ghl")
-async def ghl_webhook(request: Request):
-    """
-    Receiving end for GoHighLevel.
-
-    If you set up a GHL workflow with a 'Webhook' action pointing here, its
-    data lands in this function. GHL field names vary by setup, so we look for
-    the common ones and also keep the whole raw payload so nothing is lost.
-    """
     try:
         payload = await request.json()
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail="Expected JSON body.") from exc
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "expected JSON"}, status_code=400)
 
-    # Best-effort mapping of common GHL fields. Adjust to match your workflow.
+    phone = (
+        payload.get("phone")
+        or payload.get("caller_number")
+        or payload.get("from")
+        or "unknown"
+    )
     name = (
-        payload.get("full_name")
-        or payload.get("contact_name")
+        payload.get("contact_name")
+        or payload.get("full_name")
         or f"{payload.get('first_name', '')} {payload.get('last_name', '')}".strip()
         or None
     )
-    phone = payload.get("phone") or payload.get("caller_number")
-    text = (
+    transcript = (
         payload.get("transcript")
+        or payload.get("call_transcript")
         or payload.get("message")
-        or payload.get("notes")
+        or payload.get("body")
         or str(payload)
     )
-    note_type = payload.get("note_type", "voicemail")
-
-    return _save_note(
-        note_type=note_type,
-        raw_text=text,
-        caller_name=name,
-        caller_phone=phone,
-        source="gohighlevel",
+    summary = payload.get("summary")
+    ghl_call_id = (
+        payload.get("call_id") or payload.get("id") or payload.get("messageId")
     )
+
+    client = db.get_or_create_client(phone, name)
+    vault_file = obsidian.write_call_transcript(
+        phone=phone, transcript=transcript, caller_name=name, summary=summary
+    )
+    try:
+        message_id = db.add_message(
+            client_id=client["id"],
+            transcript=transcript,
+            summary=summary,
+            obsidian_file=vault_file,
+            ghl_call_id=str(ghl_call_id) if ghl_call_id else None,
+        )
+    except sqlite3.IntegrityError:
+        # We've already recorded this exact call (duplicate ghl_call_id).
+        return {"status": "duplicate_ignored"}
+
+    return {"status": "saved", "message_id": message_id, "obsidian_file": vault_file}

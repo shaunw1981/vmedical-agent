@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Messages · Spa Dashboard{% endblock %}
+{% block nav_msg %}active{% endblock %}
+{% block content %}
+  <h1>Phone messages</h1>
+  <div class="card">
+    <div style="display:flex;gap:.5rem;margin-bottom:1rem">
+      <a class="btn {{ 'secondary' if active_filter=='new' else 'ghost' }}"
+         href="/messages?status=new">New</a>
+      <a class="btn {{ 'secondary' if active_filter=='responded' else 'ghost' }}"
+         href="/messages?status=responded">Responded</a>
+      <a class="btn {{ 'secondary' if active_filter=='all' else 'ghost' }}"
+         href="/messages?status=all">All</a>
+    </div>
+
+    {% if not messages %}
+      <p class="muted">No messages here yet.</p>
+    {% else %}
+    <table>
+      <tr><th>When</th><th>Caller</th><th>Message</th><th>Status</th><th></th></tr>
+      {% for m in messages %}
+      <tr>
+        <td class="muted" style="white-space:nowrap">{{ m.created_at.replace('T',' ') }}</td>
+        <td>
+          <strong>{{ m.client_name or 'Unknown' }}</strong><br>
+          <span class="muted">{{ m.client_phone }}</span>
+        </td>
+        <td>
+          {% if m.summary %}<div>{{ m.summary }}</div>{% endif %}
+          <details{% if not m.summary %} open{% endif %}>
+            <summary class="muted" style="cursor:pointer">Transcript</summary>
+            <div style="white-space:pre-wrap;margin-top:.4rem">{{ m.transcript }}</div>
+          </details>
+        </td>
+        <td>
+          {% if m.status == 'responded' %}
+            <span class="tag responded">Responded</span><br>
+            <span class="muted" style="font-size:.78rem">
+              by {{ m.responded_by }}</span>
+          {% else %}
+            <span class="tag new">New</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if m.status != 'responded' and can(user.role, 'respond_messages') %}
+          <form method="post" action="/messages/{{ m.id }}/respond">
+            <button class="btn" type="submit">Mark responded</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+  </div>
+{% endblock %}

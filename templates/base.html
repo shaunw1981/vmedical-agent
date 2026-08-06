@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Spa Dashboard{% endblock %}</title>
+  <style>
+    :root { --bg:#f6f7f9; --card:#fff; --ink:#1f2430; --muted:#6b7280;
+            --line:#e5e7eb; --brand:#4f46e5; --brand-ink:#fff; --ok:#16a34a; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+           background:var(--bg); color:var(--ink); }
+    header { background:var(--card); border-bottom:1px solid var(--line);
+             padding:.8rem 1.2rem; display:flex; align-items:center; gap:1.2rem; }
+    header .brand { font-weight:700; }
+    nav { display:flex; gap:1rem; flex:1; }
+    nav a { color:var(--muted); text-decoration:none; padding:.3rem .1rem;
+            border-bottom:2px solid transparent; }
+    nav a.active, nav a:hover { color:var(--ink); border-bottom-color:var(--brand); }
+    .pill { background:#eef2ff; color:var(--brand); border-radius:999px;
+            padding:.05rem .5rem; font-size:.78rem; font-weight:600; }
+    .who { color:var(--muted); font-size:.9rem; }
+    .who a { color:var(--muted); }
+    main { max-width:960px; margin:1.5rem auto; padding:0 1.2rem; }
+    .card { background:var(--card); border:1px solid var(--line);
+            border-radius:12px; padding:1.2rem 1.4rem; margin-bottom:1rem; }
+    h1 { font-size:1.4rem; margin:.2rem 0 1rem; }
+    h2 { font-size:1.05rem; margin:.2rem 0 .6rem; }
+    .muted { color:var(--muted); }
+    .btn { background:var(--brand); color:var(--brand-ink); border:0;
+           border-radius:8px; padding:.5rem .9rem; font-size:.9rem;
+           cursor:pointer; text-decoration:none; display:inline-block; }
+    .btn.secondary { background:#eef2ff; color:var(--brand); }
+    .btn.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
+    table { width:100%; border-collapse:collapse; }
+    td, th { text-align:left; padding:.6rem .5rem; border-bottom:1px solid var(--line);
+             vertical-align:top; }
+    th { font-size:.75rem; text-transform:uppercase; color:var(--muted); }
+    .tag { font-size:.75rem; border-radius:6px; padding:.1rem .45rem; }
+    .tag.new { background:#fef3c7; color:#92400e; }
+    .tag.responded { background:#dcfce7; color:#166534; }
+    .stat { font-size:2rem; font-weight:700; }
+    .row { display:flex; gap:1rem; flex-wrap:wrap; }
+    .row .card { flex:1; min-width:180px; }
+    select, input { padding:.35rem .5rem; border:1px solid var(--line);
+                    border-radius:7px; font-size:.9rem; }
+    .banner { background:#fff7ed; border:1px solid #fed7aa; color:#9a3412;
+              padding:.6rem .9rem; border-radius:8px; margin-bottom:1rem;
+              font-size:.9rem; }
+  </style>
+</head>
+<body>
+  {% if user %}
+  <header>
+    <span class="brand">✦ Spa Dashboard</span>
+    <nav>
+      <a href="/" class="{% block nav_home %}{% endblock %}">Home</a>
+      {% if can(user.role, 'view_messages') %}
+      <a href="/messages" class="{% block nav_msg %}{% endblock %}">
+        Messages{% if new_count %} <span class="pill">{{ new_count }}</span>{% endif %}
+      </a>
+      {% endif %}
+      {% if can(user.role, 'manage_users') %}
+      <a href="/admin/users" class="{% block nav_users %}{% endblock %}">Team</a>
+      {% endif %}
+    </nav>
+    <span class="who">
+      {{ user.name or user.email }} · <span class="pill">{{ ROLE_LABELS[user.role] }}</span>
+      · <a href="/logout">Sign out</a>
+    </span>
+  </header>
+  {% endif %}
+  <main>
+    {% if user and not obsidian_ok %}
+    <div class="banner">⚠️ The Obsidian vault isn't connected yet — notes are
+      being saved to the local database only. Set <code>OBSIDIAN_VAULT_PATH</code>
+      in <code>.env</code> and restart. (See SETUP-MACMINI.md.)</div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Home · Spa Dashboard{% endblock %}
+{% block nav_home %}active{% endblock %}
+{% block content %}
+  <h1>Welcome, {{ (user.name or user.email).split(' ')[0] }}</h1>
+  <div class="row">
+    <div class="card">
+      <div class="muted">New phone messages</div>
+      <div class="stat">{{ new_count }}</div>
+      {% if can(user.role, 'view_messages') %}
+        <a class="btn secondary" href="/messages">Open inbox</a>
+      {% endif %}
+    </div>
+    <div class="card">
+      <div class="muted">Responded</div>
+      <div class="stat">{{ responded_count }}</div>
+    </div>
+    <div class="card">
+      <div class="muted">Your access level</div>
+      <div class="stat" style="font-size:1.3rem;margin-top:.4rem">
+        {{ ROLE_LABELS[user.role] }}
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>What's here now</h2>
+    <p class="muted">This is Build #1. The after-hours phone line is handled by
+      the AI receptionist; every call lands in <strong>Messages</strong> for the
+      team to follow up and is filed into the client's record in the Obsidian
+      brain. More sections (client records, in-person consult notes, and other
+      agents) will appear here as we build them.</p>
+  </div>
+{% endblock %}
