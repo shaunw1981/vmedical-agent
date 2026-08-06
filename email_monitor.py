@@ -119,28 +119,59 @@ def _section(text: str, start_labels, end_labels) -> Optional[str]:
     return None
 
 
+def _format_duration(d: Optional[str]) -> Optional[str]:
+    """Turn '285 seconds' into a friendly '4m 45s'; leave other formats as-is."""
+    if not d:
+        return d
+    m = re.match(r"^\s*(\d+)\s*seconds?\s*$", d, re.I)
+    if not m:
+        return d.strip()
+    secs = int(m.group(1))
+    if secs < 60:
+        return f"{secs}s"
+    return f"{secs // 60}m {secs % 60}s"
+
+
+def _find_name(body: str) -> Optional[str]:
+    """Find a caller name if the AI collected one (skips 'AI Agent Name')."""
+    pattern = re.compile(
+        r"(?im)^\s*(?:\d+\.\s*)?((?:full |caller |contact |first )?name)\s*[:\-]\s*(.+?)\s*$"
+    )
+    for m in pattern.finditer(body):
+        label, value = m.group(1).lower(), m.group(2).strip()
+        if "agent" in label:
+            continue
+        if value and value.lower() not in ("n/a", "none", "unknown", "not provided"):
+            return value
+    return None
+
+
 def parse_recap(subject: str, body: str) -> dict:
     """
-    Best-effort extraction from a recap email. Whatever we can't confidently
-    split out still ends up in the transcript, so nothing is ever lost.
+    Extract fields from a Client Connector / GHL "AI Call Recap" email. Whatever
+    we can't confidently split out still ends up in the transcript, so nothing is
+    ever lost.
     """
-    phone_raw = _label(body, ["From", "Caller", "Phone", "Number", "Caller Number",
-                              "Phone Number", "Contact Number", "CallFrom"])
+    phone_raw = _label(body, ["Caller's Number", "Callers Number", "Caller Number",
+                              "From", "CallFrom", "Phone Number", "Phone"])
     phone = None
     if phone_raw:
         pm = _PHONE_RE.search(phone_raw)
-        phone = pm.group(1).strip() if pm else phone_raw
+        phone = pm.group(1).strip() if pm else phone_raw.strip()
     if not phone:
         pm = _PHONE_RE.search(body)
         phone = pm.group(1).strip() if pm else "unknown"
 
-    name = _label(body, ["Name", "Caller Name", "Contact", "Contact Name",
-                         "Full Name", "Customer"])
-    duration = _label(body, ["Duration", "Call Duration", "Length", "Call Length"])
-    summary = _section(body, ["Summary", "Call Summary", "Recap", "Overview"],
-                       ["Transcript", "Full Transcript", "Conversation", "Call Transcript"])
-    transcript = _section(body, ["Transcript", "Full Transcript", "Call Transcript",
-                                 "Conversation"], [])
+    name = _find_name(body)
+    duration = _format_duration(
+        _label(body, ["Call Duration", "Duration", "Call Length", "Length"])
+    )
+    summary = _section(
+        body, ["Call Summary", "Summary"],
+        ["Details collected from the contact", "Details collected",
+         "Call Transcript", "Transcript"],
+    )
+    transcript = _section(body, ["Call Transcript", "Transcript"], [])
     if not transcript:
         transcript = body  # fall back to the whole email so nothing is lost
 
