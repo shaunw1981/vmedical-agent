@@ -21,6 +21,7 @@ from starlette.middleware.sessions import SessionMiddleware
 import auth
 import config
 import db
+import email_monitor
 import obsidian
 
 app = FastAPI(title="vmedical-agent dashboard", version="3.0.0")
@@ -36,6 +37,7 @@ templates.env.globals.update(
 @app.on_event("startup")
 def _startup() -> None:
     db.init_db()
+    email_monitor.start_background()
 
 
 def _ctx(request: Request, user: dict, **extra) -> dict:

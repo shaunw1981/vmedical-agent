@@ -42,6 +42,24 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 # Optional shared secret so only GoHighLevel can post to the call webhook.
 GHL_WEBHOOK_SECRET = os.environ.get("GHL_WEBHOOK_SECRET", "").strip()
 
+# --- Email monitor (reads the "AI Call Recap" emails) ------------------------
+# The app checks this mailbox on a schedule and turns each new recap email into
+# a dashboard message + Obsidian note. Leave IMAP_USER/IMAP_PASSWORD blank to
+# turn the email monitor off.
+IMAP_HOST = os.environ.get("IMAP_HOST", "imap.gmail.com").strip()
+IMAP_PORT = int(os.environ.get("IMAP_PORT", "993") or "993")
+IMAP_USER = os.environ.get("IMAP_USER", "").strip()
+IMAP_PASSWORD = os.environ.get("IMAP_PASSWORD", "").replace(" ", "").strip()
+# Only emails from this sender with this subject prefix are treated as recaps.
+RECAP_FROM = os.environ.get("RECAP_FROM", "reply@c.clientconnector.app").strip().lower()
+RECAP_SUBJECT_PREFIX = os.environ.get("RECAP_SUBJECT_PREFIX", "AI Call Recap").strip()
+# How often to check the inbox, in seconds.
+EMAIL_POLL_SECONDS = int(os.environ.get("EMAIL_POLL_SECONDS", "60") or "60")
+
+
+def email_monitor_enabled() -> bool:
+    return bool(IMAP_USER and IMAP_PASSWORD)
+
 # --- Roles and permissions ---------------------------------------------------
 # The three access levels, highest to lowest.
 ROLES = ["super_admin", "spa_manager", "team_member"]
