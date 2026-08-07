@@ -295,9 +295,12 @@ def reminders_create(
         email=email, phone=phone, created_by=user["email"],
     )
     if result["ok"]:
-        request.session["reminder_flash"] = {
-            "ok": True, "msg": f"Reminder scheduled for {contact_name} — added to the "
-                               f"“{result['label']}” follow-up in GoHighLevel."}
+        msg = (f"Reminder scheduled for {contact_name} — added to the "
+               f"“{result['label']}” follow-up in GoHighLevel")
+        msg += " and booked on the calendar." if result.get("booked") else "."
+        if result.get("warning"):
+            msg += f" ⚠️ {result['warning']}"
+        request.session["reminder_flash"] = {"ok": True, "msg": msg}
     else:
         request.session["reminder_flash"] = {"ok": False, "msg": result["error"]}
     return RedirectResponse("/reminders", status_code=303)
@@ -330,16 +333,22 @@ def reminders_settings(request: Request, debug: int = 0):
                 json.dumps(ghl.reminders_debug(config.reminder_location_id()), indent=2, default=str))
         except Exception as exc:  # noqa: BLE001
             return PlainTextResponse(f"ERROR: {exc}", status_code=500)
-    workflows, wf_error = [], None
+    workflows, calendars, wf_error = [], [], None
     if config.ghl_contacts_enabled():
+        loc = config.reminder_location_id()
         try:
-            workflows = ghl.list_workflows(config.reminder_location_id())
+            workflows = ghl.list_workflows(loc)
         except Exception as exc:  # noqa: BLE001
             wf_error = str(exc)
+        try:
+            calendars = ghl.list_calendars(loc)
+        except Exception:  # noqa: BLE001 - calendars are optional; ignore load errors
+            calendars = []
     return templates.TemplateResponse(
         "reminders_settings.html",
-        _reminders_ctx(request, user, workflows=workflows, wf_error=wf_error,
-                       mapping=reminders.get_workflow_map()),
+        _reminders_ctx(request, user, workflows=workflows, calendars=calendars,
+                       wf_error=wf_error, mapping=reminders.get_workflow_map(),
+                       cal_mapping=reminders.get_calendar_map()),
     )
 
 
@@ -349,17 +358,25 @@ async def reminders_settings_save(request: Request):
     if resp:
         return resp
     form = await request.form()
-    # Build a name lookup so we can store the workflow's display name too.
-    names: dict[str, str] = {}
+    # Build name lookups so we can store each workflow/calendar's display name too.
+    wf_names: dict[str, str] = {}
+    cal_names: dict[str, str] = {}
     if config.ghl_contacts_enabled():
+        loc = config.reminder_location_id()
         try:
-            names = {w["id"]: w["name"] for w in ghl.list_workflows(config.reminder_location_id())}
+            wf_names = {w["id"]: w["name"] for w in ghl.list_workflows(loc)}
         except Exception:  # noqa: BLE001
-            names = {}
+            wf_names = {}
+        try:
+            cal_names = {c["id"]: c["name"] for c in ghl.list_calendars(loc)}
+        except Exception:  # noqa: BLE001
+            cal_names = {}
     for key, _label in config.APPOINTMENT_TYPES:
         wid = (form.get(f"wf_{key}") or "").strip()
-        reminders.set_workflow_map(key, wid, names.get(wid, ""))
-    request.session["reminder_flash"] = {"ok": True, "msg": "Workflow mapping saved."}
+        reminders.set_workflow_map(key, wid, wf_names.get(wid, ""))
+        cid = (form.get(f"cal_{key}") or "").strip()
+        reminders.set_calendar_map(key, cid, cal_names.get(cid, ""))
+    request.session["reminder_flash"] = {"ok": True, "msg": "Workflow &amp; calendar mapping saved."}
     return RedirectResponse("/reminders/settings", status_code=303)
 
 

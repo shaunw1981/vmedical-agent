@@ -378,6 +378,39 @@ def add_contact_to_workflow(contact_id: str, workflow_id: str,
     return _post(f"/contacts/{contact_id}/workflow/{workflow_id}", body)
 
 
+def list_calendars(location_id: str) -> list[dict]:
+    """All calendars for a location (id + name), for the reminder mapping page."""
+    data = _get("/calendars/", params={"locationId": location_id})
+    rows = (data.get("calendars") if isinstance(data, dict) else None) or []
+    return [{"id": str(_first(c, "id", "_id", default="")),
+             "name": _first(c, "name", default="(unnamed calendar)")} for c in rows
+            if _first(c, "id", "_id")]
+
+
+def create_appointment(location_id: str, calendar_id: str, contact_id: str,
+                       start_time: str, end_time: str, title: Optional[str] = None,
+                       notify: bool = False) -> dict:
+    """
+    Book an appointment on the contact's record. start_time/end_time are ISO8601
+    with the clinic's UTC offset. notify=False leaves reminders to the workflow.
+    """
+    body: dict = {
+        "calendarId": calendar_id,
+        "locationId": location_id,
+        "contactId": contact_id,
+        "startTime": start_time,
+        "endTime": end_time,
+        "appointmentStatus": "confirmed",
+        "ignoreFreeSlotValidation": True,   # book the exact time we were given
+        "toNotify": notify,
+    }
+    if title:
+        body["title"] = title
+    data = _post("/calendars/events/appointments", body)
+    aid = _first(data, "id", "_id", "appointmentId", "eventId") if isinstance(data, dict) else None
+    return {"id": str(aid) if aid else "", "raw": data}
+
+
 def reminders_debug(location_id: str, sample_query: str = "a") -> dict:
     """Credential-redacted raw contact/workflow responses, for /reminders/settings?debug=1."""
     out: dict = {"location_id": location_id}
@@ -391,6 +424,10 @@ def reminders_debug(location_id: str, sample_query: str = "a") -> dict:
         )
     except Exception as exc:  # noqa: BLE001
         out["contacts_search_error"] = str(exc)
+    try:
+        out["calendars_raw"] = _redact(_get("/calendars/", params={"locationId": location_id}))
+    except Exception as exc:  # noqa: BLE001
+        out["calendars_error"] = str(exc)
     return out
 
 

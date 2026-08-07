@@ -32,6 +32,11 @@
 
     <div class="card">
       <form method="post" action="/reminders/settings" class="map-form">
+        <div class="map-row map-head">
+          <span>Appointment type</span>
+          <span>Follow-up workflow</span>
+          <span>Book on calendar <em class="muted">(optional)</em></span>
+        </div>
         {% for key, label in appt_types %}
         <div class="map-row">
           <label for="wf_{{ key }}" class="map-label">{{ label }}</label>
@@ -47,12 +52,24 @@
           <input type="text" id="wf_{{ key }}" name="wf_{{ key }}"
                  value="{{ mapping[key].id }}" placeholder="Paste GHL workflow ID">
           {% endif %}
+          {% if calendars %}
+          <select id="cal_{{ key }}" name="cal_{{ key }}">
+            <option value="">— Don't book an appointment —</option>
+            {% for c in calendars %}
+            <option value="{{ c.id }}" {{ 'selected' if cal_mapping[key].id == c.id }}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+          {% else %}
+          <input type="text" id="cal_{{ key }}" name="cal_{{ key }}"
+                 value="{{ cal_mapping[key].id }}" placeholder="Paste GHL calendar ID (optional)">
+          {% endif %}
         </div>
         {% endfor %}
         <div class="map-actions">
           <button class="btn" type="submit">Save mapping</button>
-          {% if workflows %}<span class="muted" style="font-size:.8rem">
-            {{ workflows|length }} workflow{{ '' if workflows|length == 1 else 's' }} loaded from GoHighLevel.</span>{% endif %}
+          <span class="muted" style="font-size:.8rem">
+            {% if workflows %}{{ workflows|length }} workflows{% endif %}
+            {% if calendars %}· {{ calendars|length }} calendars{% endif %} loaded from GoHighLevel.</span>
         </div>
       </form>
     </div>

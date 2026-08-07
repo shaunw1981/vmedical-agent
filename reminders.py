@@ -13,7 +13,7 @@ in the settings table, so workflow ids never live in code.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import config
@@ -22,6 +22,8 @@ import ghl
 
 _MAP_PREFIX = "appt_workflow:"       # -> workflow id
 _MAP_NAME_PREFIX = "appt_workflow_name:"  # -> workflow name (for display)
+_CAL_PREFIX = "appt_calendar:"       # -> calendar id
+_CAL_NAME_PREFIX = "appt_calendar_name:"  # -> calendar name (for display)
 
 
 # --- Timezone ----------------------------------------------------------------
@@ -44,12 +46,23 @@ def parse_appt_at(value: str) -> datetime:
         raise ValueError("That date/time wasn't understood — please re-enter it.")
 
 
-def to_ghl_event_time(local_dt: datetime) -> str:
-    """A naive local appointment time -> ISO8601 with the clinic's UTC offset."""
+def _localize(local_dt: datetime) -> datetime:
     tz = _clinic_tz()
     if tz is not None and local_dt.tzinfo is None:
-        local_dt = local_dt.replace(tzinfo=tz)
-    return local_dt.isoformat()
+        return local_dt.replace(tzinfo=tz)
+    return local_dt
+
+
+def to_ghl_event_time(local_dt: datetime) -> str:
+    """A naive local appointment time -> ISO8601 with the clinic's UTC offset."""
+    return _localize(local_dt).isoformat()
+
+
+def to_ghl_times(local_dt: datetime) -> tuple[str, str]:
+    """(start, end) ISO8601 strings, end = start + configured appointment length."""
+    start = _localize(local_dt)
+    end = start + timedelta(minutes=config.APPOINTMENT_DURATION_MINUTES)
+    return start.isoformat(), end.isoformat()
 
 
 def format_appt(appt_at: str) -> str:
@@ -62,10 +75,14 @@ def format_appt(appt_at: str) -> str:
 
 # --- Workflow mapping (type_key -> GHL workflow) -----------------------------
 def get_workflow_map() -> dict[str, dict]:
-    """{type_key: {'id': workflow_id, 'name': workflow_name}} for every type."""
+    """{type_key: {'id': workflow_id, 'name': workflow_name}} for every type.
+
+    Falls back to config.DEFAULT_APPOINTMENT_WORKFLOWS when no in-app override
+    is set, so reminders work out of the box.
+    """
     out: dict[str, dict] = {}
     for key, _label in config.APPOINTMENT_TYPES:
-        wid = db.get_setting(_MAP_PREFIX + key)
+        wid = db.get_setting(_MAP_PREFIX + key) or config.DEFAULT_APPOINTMENT_WORKFLOWS.get(key, "")
         out[key] = {"id": wid or "", "name": db.get_setting(_MAP_NAME_PREFIX + key) or ""}
     return out
 
@@ -78,6 +95,25 @@ def set_workflow_map(type_key: str, workflow_id: str, workflow_name: str = "") -
     else:
         db.delete_setting(_MAP_PREFIX + type_key)
         db.delete_setting(_MAP_NAME_PREFIX + type_key)
+
+
+def get_calendar_map() -> dict[str, dict]:
+    """{type_key: {'id': calendar_id, 'name': calendar_name}}; empty id = don't book."""
+    out: dict[str, dict] = {}
+    for key, _label in config.APPOINTMENT_TYPES:
+        out[key] = {"id": db.get_setting(_CAL_PREFIX + key) or "",
+                    "name": db.get_setting(_CAL_NAME_PREFIX + key) or ""}
+    return out
+
+
+def set_calendar_map(type_key: str, calendar_id: str, calendar_name: str = "") -> None:
+    calendar_id = (calendar_id or "").strip()
+    if calendar_id:
+        db.set_setting(_CAL_PREFIX + type_key, calendar_id)
+        db.set_setting(_CAL_NAME_PREFIX + type_key, (calendar_name or "").strip())
+    else:
+        db.delete_setting(_CAL_PREFIX + type_key)
+        db.delete_setting(_CAL_NAME_PREFIX + type_key)
 
 
 def mapping_complete() -> bool:
@@ -131,9 +167,27 @@ def schedule(name: str, appt_at: str, type_key: str,
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"GoHighLevel error: {exc}"}
 
+    # Also book a real appointment on the contact's record, if a calendar is set
+    # for this type. A booking failure must not lose the (already-added) reminder.
+    cal = get_calendar_map().get(type_key, {})
+    ghl_appt_id, warning = None, None
+    if cal.get("id"):
+        try:
+            start_iso, end_iso = to_ghl_times(local_dt)
+            appt = ghl.create_appointment(location_id, cal["id"], contact_id,
+                                          start_iso, end_iso, title=f"{label} — {name}")
+            ghl_appt_id = appt.get("id") or None
+        except Exception as exc:  # noqa: BLE001
+            warning = f"Contact added to the workflow, but the GHL appointment couldn't be booked: {exc}"
+
     appt_id = db.add_appointment(
         contact_name=name, appt_at=appt_iso, type_key=type_key, type_label=label,
         email=email, phone=phone, workflow_id=workflow_id,
-        workflow_name=wf.get("name") or "", ghl_contact_id=contact_id, created_by=created_by,
+        workflow_name=wf.get("name") or "", ghl_contact_id=contact_id,
+        ghl_appointment_id=ghl_appt_id, created_by=created_by,
     )
-    return {"ok": True, "appointment_id": appt_id, "contact_id": contact_id, "label": label}
+    result = {"ok": True, "appointment_id": appt_id, "contact_id": contact_id,
+              "label": label, "booked": bool(ghl_appt_id)}
+    if warning:
+        result["warning"] = warning
+    return result

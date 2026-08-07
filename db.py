@@ -82,6 +82,7 @@ def init_db() -> None:
                 workflow_id    TEXT,
                 workflow_name  TEXT,
                 ghl_contact_id TEXT,
+                ghl_appointment_id TEXT,
                 status         TEXT NOT NULL DEFAULT 'scheduled',  -- scheduled|cancelled
                 note           TEXT
             );
@@ -92,6 +93,9 @@ def init_db() -> None:
         existing = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
         if "duration" not in existing:
             conn.execute("ALTER TABLE messages ADD COLUMN duration TEXT")
+        appt_cols = {row["name"] for row in conn.execute("PRAGMA table_info(appointments)")}
+        if appt_cols and "ghl_appointment_id" not in appt_cols:
+            conn.execute("ALTER TABLE appointments ADD COLUMN ghl_appointment_id TEXT")
 
 
 # --- Users -------------------------------------------------------------------
@@ -261,6 +265,7 @@ def add_appointment(
     workflow_id: Optional[str] = None,
     workflow_name: Optional[str] = None,
     ghl_contact_id: Optional[str] = None,
+    ghl_appointment_id: Optional[str] = None,
     created_by: Optional[str] = None,
     note: Optional[str] = None,
 ) -> int:
@@ -269,12 +274,13 @@ def add_appointment(
             "INSERT INTO appointments "
             "(created_at, created_by, contact_name, email, phone, appt_at, "
             " type_key, type_label, workflow_id, workflow_name, ghl_contact_id, "
-            " status, note) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)",
+            " ghl_appointment_id, status, note) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)",
             (
                 datetime.now().isoformat(timespec="seconds"),
                 created_by, contact_name, email, phone, appt_at,
-                type_key, type_label, workflow_id, workflow_name, ghl_contact_id, note,
+                type_key, type_label, workflow_id, workflow_name, ghl_contact_id,
+                ghl_appointment_id, note,
             ),
         )
         return int(cur.lastrowid)

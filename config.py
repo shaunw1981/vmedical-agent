@@ -98,6 +98,24 @@ APPOINTMENT_TYPES: list[tuple[str, str]] = [
 ]
 APPOINTMENT_TYPE_LABELS = dict(APPOINTMENT_TYPES)
 
+# The clinic's actual GoHighLevel workflow for each type. Used as the default
+# mapping so reminders work out of the box; can be overridden in-app under
+# Reminders → Reminder settings.
+DEFAULT_APPOINTMENT_WORKFLOWS = {
+    "spa_aesthetics_laser": "cdbad5bf-4259-4f2c-803d-ae76453844d5",
+    "sclerotherapy": "e92f01cf-c8f0-439e-b212-08d03d80523f",
+    "evlt": "08526574-5694-415b-8638-ffaf89c94fde",
+    "consult_dr_davidson": "3df3e2f8-fbc8-4e9b-ae8d-30ff58751bf8",
+    "ultrasound": "30e0614e-0c6e-44bf-89bd-8b3c3e8eda0f",
+    "compression_brace_fitting": "6ae719b1-9d50-4f85-9757-f195d96db40f",
+}
+
+# How long a booked appointment lasts (minutes), used to set its end time when
+# we also create the appointment on the contact's GHL record.
+APPOINTMENT_DURATION_MINUTES = int(
+    os.environ.get("APPOINTMENT_DURATION_MINUTES", "60") or "60"
+)
+
 # Optional API key so a future Chrome extension can call the JSON endpoints
 # (contact lookup + schedule reminder) without a browser session. Leave blank
 # to keep those endpoints session-only.
