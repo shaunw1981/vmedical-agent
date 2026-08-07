@@ -49,6 +49,12 @@ def init_db() -> None:
                 updated_at  TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS settings (
+                key         TEXT PRIMARY KEY,
+                value       TEXT,
+                updated_at  TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS messages (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 client_id     INTEGER NOT NULL REFERENCES clients(id),
@@ -69,6 +75,28 @@ def init_db() -> None:
         existing = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
         if "duration" not in existing:
             conn.execute("ALTER TABLE messages ADD COLUMN duration TEXT")
+
+
+# --- Settings (small key/value store, e.g. OAuth refresh tokens) -------------
+def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
+    with _connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+            "updated_at = excluded.updated_at",
+            (key, value, datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def delete_setting(key: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM settings WHERE key = ?", (key,))
 
 
 # --- Users -------------------------------------------------------------------

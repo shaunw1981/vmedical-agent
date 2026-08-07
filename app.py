@@ -27,12 +27,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
+import secrets
+
 import auth
 import charts
 import config
 import db
 import email_monitor
 import ghl
+import google_business
 import obsidian
 
 BASE_DIR = Path(__file__).parent
@@ -255,23 +258,35 @@ def reviews(request: Request, debug: int = 0):
     user, resp = _guard(request, "view_reviews")
     if resp:
         return resp
-    # Diagnostic dump (super admin only) — confirm GHL's review field names.
+    # Diagnostic dump (super admin only) — confirm field names / connection.
     if debug and config.can(user["role"], "manage_settings"):
         import json
         from fastapi.responses import PlainTextResponse
-        if not config.ghl_reviews_enabled():
-            return PlainTextResponse("GHL not configured (set GHL_API_TOKEN and GHL_LOCATIONS).")
-        try:
-            return PlainTextResponse(json.dumps(ghl.reviews_raw_debug(), indent=2, default=str))
-        except Exception as exc:  # noqa: BLE001
-            return PlainTextResponse(f"ERROR: {exc}", status_code=500)
+        out = {"google_business": google_business.debug()}
+        if config.ghl_reviews_enabled():
+            try:
+                out["ghl"] = ghl.reviews_raw_debug()
+            except Exception as exc:  # noqa: BLE001
+                out["ghl_error"] = str(exc)
+        return PlainTextResponse(json.dumps(out, indent=2, default=str))
+
+    # Source preference: Google Business (direct) if connected, else GoHighLevel.
     data = None
     error = None
-    if config.ghl_reviews_enabled():
+    source = None
+    if google_business.is_connected():
+        source = "google"
+        try:
+            data = google_business.reviews_overview()
+        except Exception as exc:  # noqa: BLE001
+            error = str(exc)
+    elif config.ghl_reviews_enabled():
+        source = "ghl"
         try:
             data = ghl.reviews_overview()
         except Exception as exc:  # noqa: BLE001
             error = str(exc)
+
     return templates.TemplateResponse(
         "reviews.html",
         _ctx(
@@ -279,10 +294,59 @@ def reviews(request: Request, debug: int = 0):
             user,
             reviews=data,
             reviews_error=error,
-            reviews_enabled=config.ghl_reviews_enabled(),
+            reviews_enabled=bool(source),
+            reviews_source=source,
+            google_connectable=google_business.enabled() and not google_business.is_connected(),
+            google_connected=google_business.is_connected(),
             review_flash=request.session.pop("review_flash", None),
         ),
     )
+
+
+# --- Google Business connect flow (reviews source) ---------------------------
+@app.get("/reviews/connect-google")
+def connect_google(request: Request):
+    user, resp = _guard(request, "manage_settings")
+    if resp:
+        return resp
+    if not google_business.enabled():
+        request.session["review_flash"] = {"ok": False,
+            "msg": "Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET first."}
+        return RedirectResponse("/reviews", status_code=303)
+    state = secrets.token_urlsafe(24)
+    request.session["gbp_state"] = state
+    redirect_uri = f"{config.BASE_URL}/auth/google-business/callback"
+    return RedirectResponse(google_business.auth_url(redirect_uri, state), status_code=303)
+
+
+@app.get("/auth/google-business/callback")
+def google_business_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    user, resp = _guard(request, "manage_settings")
+    if resp:
+        return resp
+    expected = request.session.pop("gbp_state", None)
+    if error:
+        request.session["review_flash"] = {"ok": False, "msg": f"Google declined: {error}"}
+    elif not code or not state or state != expected:
+        request.session["review_flash"] = {"ok": False,
+            "msg": "Google connection couldn't be verified — please try again."}
+    else:
+        try:
+            google_business.exchange_code(code, f"{config.BASE_URL}/auth/google-business/callback")
+            request.session["review_flash"] = {"ok": True, "msg": "Google Business connected."}
+        except Exception as exc:  # noqa: BLE001
+            request.session["review_flash"] = {"ok": False, "msg": f"Couldn't connect Google: {exc}"}
+    return RedirectResponse("/reviews", status_code=303)
+
+
+@app.post("/reviews/disconnect-google")
+def disconnect_google(request: Request):
+    user, resp = _guard(request, "manage_settings")
+    if resp:
+        return resp
+    google_business.disconnect()
+    request.session["review_flash"] = {"ok": True, "msg": "Google Business disconnected."}
+    return RedirectResponse("/reviews", status_code=303)
 
 
 @app.post("/reviews/reply")
@@ -291,8 +355,9 @@ def reply_review(
     review_id: str = Form(...),
     location_id: str = Form(...),
     reply: str = Form(...),
+    source: str = Form("ghl"),
 ):
-    """Post a public reply to a review via GoHighLevel (needs write scope)."""
+    """Post a public reply to a review (via Google Business or GoHighLevel)."""
     user, resp = _guard(request, "respond_reviews")
     if resp:
         return resp
@@ -301,8 +366,13 @@ def reply_review(
         request.session["review_flash"] = {"ok": False, "msg": "Reply was empty — nothing sent."}
         return RedirectResponse("/reviews", status_code=303)
     try:
-        ghl.reply_to_review(review_id, location_id, text)
-        request.session["review_flash"] = {"ok": True, "msg": "Reply sent to GoHighLevel."}
+        if source == "google":
+            google_business.reply_to_review(review_id, location_id, text)
+            where = "Google"
+        else:
+            ghl.reply_to_review(review_id, location_id, text)
+            where = "GoHighLevel"
+        request.session["review_flash"] = {"ok": True, "msg": f"Reply sent to {where}."}
     except Exception as exc:  # noqa: BLE001
         request.session["review_flash"] = {"ok": False, "msg": f"Couldn't post reply: {exc}"}
     return RedirectResponse("/reviews", status_code=303)

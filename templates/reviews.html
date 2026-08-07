@@ -10,7 +10,8 @@
     {% if reviews %}<span class="muted" style="font-size:.82rem">Updated {{ reviews.generated_at }}</span>{% endif %}
   </div>
   <p class="muted" style="margin:.1rem 0 1.1rem">
-    Your Google &amp; Facebook reviews, pulled from GoHighLevel's Reputation manager.</p>
+    {% if reviews_source == 'google' %}Your Google reviews, direct from Google Business Profile.
+    {% else %}Your Google &amp; Facebook reviews, from GoHighLevel's Reputation manager.{% endif %}</p>
 
   {% if review_flash %}
   <div class="banner {{ 'info' if review_flash.ok else '' }}"
@@ -20,21 +21,28 @@
 
   {% if not reviews_enabled %}
     <div class="card">
-      <h2>Connect GoHighLevel to turn this on</h2>
-      <p class="muted" style="margin-top:.2rem">This tab reads your reviews using a read-only
-        key — it can look, but never post or change anything.</p>
+      <h2>Connect a review source</h2>
+      {% if can(user.role, 'manage_settings') and google_connectable %}
+      <p class="muted" style="margin:.2rem 0 .8rem">Connect your Google Business Profile to pull
+        Google reviews directly (and reply from here). You'll be asked to sign in to the Google
+        account that manages the profile.</p>
+      <a class="btn" href="/reviews/connect-google">Connect Google Business</a>
+      <p class="muted" style="font-size:.8rem;margin-top:.5rem">Note: Google must approve your
+        Cloud project for the Business Profile API before reviews appear.</p>
+      <hr style="border:0;border-top:1px solid var(--line);margin:1.1rem 0">
+      {% endif %}
+      <p class="muted" style="margin:.2rem 0 .4rem"><strong>Or use GoHighLevel</strong> (Google + Facebook):</p>
       <ol class="setup-steps">
         <li>In GoHighLevel → <strong>Settings → Private Integrations</strong>, add the read-only
-            <strong>“View Reviews”</strong> reputation scope to the same token the Social tab uses
-            (or create one with it).</li>
-        <li>Make sure <code>GHL_API_TOKEN</code> and <code>GHL_LOCATIONS</code> are set (they’re
-            shared with the Social tab).</li>
+            <strong>“View Reviews”</strong> reputation scope to the token the Social tab uses.</li>
+        <li>Make sure <code>GHL_API_TOKEN</code> and <code>GHL_LOCATIONS</code> are set.</li>
         <li>Double-click <code>restart.command</code>, then reload this page.</li>
       </ol>
     </div>
 
   {% elif reviews_error %}
-    <div class="banner">⚠️ Couldn't load reviews from GoHighLevel.
+    <div class="banner">⚠️ Couldn't load reviews from
+      {{ 'Google' if reviews_source == 'google' else 'GoHighLevel' }}.
       <div style="margin-top:.4rem;font-size:.85rem;color:#7c2d12">{{ reviews_error }}</div>
     </div>
 
@@ -133,10 +141,12 @@
               <form method="post" action="/reviews/reply" class="reply-form">
                 <input type="hidden" name="review_id" value="{{ r.id }}">
                 <input type="hidden" name="location_id" value="{{ r.location_id }}">
+                <input type="hidden" name="source" value="{{ reviews_source }}">
                 <textarea name="reply" rows="3" required
                   placeholder="Write a public reply to {{ r.reviewer }}…"></textarea>
                 <div class="reply-actions">
-                  <span class="muted" style="font-size:.76rem">Posts publicly on {{ r.source }} via GoHighLevel.</span>
+                  <span class="muted" style="font-size:.76rem">Posts publicly on {{ r.source }}
+                    {% if reviews_source == 'google' %}via Google{% else %}via GoHighLevel{% endif %}.</span>
                   <button class="btn" type="submit">Send reply</button>
                 </div>
               </form>
@@ -148,8 +158,15 @@
       </div>
     </div>
 
-    <p class="note-inline">Reviews come from GoHighLevel's Reputation manager
+    <p class="note-inline">Reviews come from
+      {% if reviews_source == 'google' %}Google Business Profile{% else %}GoHighLevel's Reputation manager{% endif %}
       {% if reviews.sampled %}(showing the {{ fmt(reviews.totals.count) }} most recent){% endif %}.
-      Averages and the breakdown are based on the reviews loaded here.</p>
+      Averages and the breakdown are based on the reviews loaded here.
+      {% if reviews_source == 'google' and can(user.role, 'manage_settings') %}
+      <form method="post" action="/reviews/disconnect-google" style="display:inline;margin-left:.4rem"
+            onsubmit="return confirm('Disconnect Google Business?')">
+        <button class="btn ghost" type="submit" style="padding:.15rem .5rem;font-size:.75rem">Disconnect Google</button>
+      </form>
+      {% endif %}</p>
   {% endif %}
 {% endblock %}
