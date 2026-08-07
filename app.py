@@ -249,6 +249,41 @@ def social(request: Request, debug: int = 0):
     )
 
 
+# --- Reviews (reputation) ----------------------------------------------------
+@app.get("/reviews", response_class=HTMLResponse)
+def reviews(request: Request, debug: int = 0):
+    user, resp = _guard(request, "view_reviews")
+    if resp:
+        return resp
+    # Diagnostic dump (super admin only) — confirm GHL's review field names.
+    if debug and config.can(user["role"], "manage_settings"):
+        import json
+        from fastapi.responses import PlainTextResponse
+        if not config.ghl_reviews_enabled():
+            return PlainTextResponse("GHL not configured (set GHL_API_TOKEN and GHL_LOCATIONS).")
+        try:
+            return PlainTextResponse(json.dumps(ghl.reviews_raw_debug(), indent=2, default=str))
+        except Exception as exc:  # noqa: BLE001
+            return PlainTextResponse(f"ERROR: {exc}", status_code=500)
+    data = None
+    error = None
+    if config.ghl_reviews_enabled():
+        try:
+            data = ghl.reviews_overview()
+        except Exception as exc:  # noqa: BLE001
+            error = str(exc)
+    return templates.TemplateResponse(
+        "reviews.html",
+        _ctx(
+            request,
+            user,
+            reviews=data,
+            reviews_error=error,
+            reviews_enabled=config.ghl_reviews_enabled(),
+        ),
+    )
+
+
 # --- Message inbox -----------------------------------------------------------
 # A transcript line looks like "Speaker label: what they said". We split on the
 # FIRST colon so labels that contain their own dash/hyphen survive intact

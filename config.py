@@ -74,6 +74,11 @@ def ghl_social_enabled() -> bool:
     """True once a token and at least one location id are configured."""
     return bool(GHL_API_TOKEN and GHL_LOCATIONS)
 
+
+def ghl_reviews_enabled() -> bool:
+    """Reviews use the same token + locations (plus the reputation read scope)."""
+    return bool(GHL_API_TOKEN and GHL_LOCATIONS)
+
 # --- Email monitor (reads the "AI Call Recap" emails) ------------------------
 # The app checks this mailbox on a schedule and turns each new recap email into
 # a dashboard message + Obsidian note. Leave IMAP_USER/IMAP_PASSWORD blank to
@@ -109,6 +114,7 @@ DEFAULT_ROLE = "team_member"
 #   manage_users      - invite/remove team members and change their roles
 #   manage_settings   - change system settings (future)
 #   view_social       - see the social-media posting-activity dashboard
+#   view_reviews      - see the Google/Facebook reviews (reputation) dashboard
 ROLE_CAPABILITIES = {
     "super_admin": {
         "view_messages",
@@ -116,12 +122,14 @@ ROLE_CAPABILITIES = {
         "manage_users",
         "manage_settings",
         "view_social",
+        "view_reviews",
     },
     "spa_manager": {
         "view_messages",
         "respond_messages",
         "manage_users",  # managers can manage team members (but not super admins)
         "view_social",
+        "view_reviews",
     },
     "team_member": {
         "view_messages",

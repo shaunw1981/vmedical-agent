@@ -295,6 +295,127 @@ def social_overview(now: Optional[datetime] = None) -> dict:
     }
 
 
+# --- Reviews (Reputation) ----------------------------------------------------
+# Google + Facebook reviews sync into GoHighLevel's Reputation manager and are
+# read back here with the same Private Integration Token (add the read-only
+# "View Reviews" reputation scope to it). Field names vary a little across GHL
+# API versions, so parsing stays deliberately tolerant (_first with aliases);
+# /reviews?debug=1 dumps the raw shape so mappings can be confirmed on connect.
+
+_REVIEW_SOURCE_LABELS = {
+    "google": "Google", "facebook": "Facebook", "yelp": "Yelp",
+    "gmb": "Google", "google_my_business": "Google",
+}
+
+
+def get_reviews(location_id: str, limit: int = 100,
+                review_type: Optional[str] = None) -> list[dict]:
+    """Recent reviews for a location, newest first."""
+    params = {
+        "locationId": location_id,
+        "limit": str(limit),
+        "sortBy": "reviewDate",
+        "sortOrder": "desc",
+    }
+    if review_type:
+        params["type"] = review_type
+    data = _get("/reputation/reviews", params=params)
+    if isinstance(data, dict):
+        body = data.get("reviews", data.get("data", data.get("results")))
+        if isinstance(body, dict):
+            body = body.get("reviews", body.get("data"))
+        return body if isinstance(body, list) else []
+    return data if isinstance(data, list) else []
+
+
+def _review_source_label(raw: str) -> str:
+    key = (raw or "").lower()
+    return _REVIEW_SOURCE_LABELS.get(key, (raw or "Review").title())
+
+
+def _norm_review(r: dict) -> dict:
+    """Flatten one raw review into the fields the template needs."""
+    try:
+        rating = int(round(float(_first(r, "rating", "reviewRating", "stars", default=0) or 0)))
+    except (TypeError, ValueError):
+        rating = 0
+    rating = max(0, min(5, rating))
+
+    reviewer = _first(r, "reviewer", "reviewerName", "name", "userName", "author", default="")
+    if isinstance(reviewer, dict):
+        reviewer = _first(reviewer, "name", "displayName", "firstName", default="")
+    text = _first(r, "comment", "content", "reviewComment", "reviewBody", "text", "review", default="")
+
+    src_key = (_first(r, "platform", "source", "type", "provider", default="") or "").lower()
+    dt = _parse_dt(_first(r, "reviewDate", "dateAdded", "createdAt", "date", "updatedAt"))
+
+    reply = _first(r, "reply", "replyComment", "response", "reviewReply", default="")
+    if isinstance(reply, dict):
+        reply = _first(reply, "comment", "content", "text", default="")
+    replied_flag = _first(r, "replied", "isReplied", "hasReply", default=None)
+    status = (_first(r, "status", default="") or "").lower()
+    replied = bool(reply) or replied_flag is True or status == "replied"
+
+    return {
+        "reviewer": (reviewer or "Anonymous").strip() or "Anonymous",
+        "rating": rating,
+        "text": (text or "").strip(),
+        "source_key": src_key or "other",
+        "source": _review_source_label(src_key) if src_key else "Review",
+        "date": dt.strftime("%b %-d, %Y") if dt else None,
+        "_sort": dt or datetime.min.replace(tzinfo=timezone.utc),
+        "replied": replied,
+        "reply": (reply or "").strip(),
+    }
+
+
+def reviews_overview(now: Optional[datetime] = None,
+                     per_location_limit: int = 200) -> dict:
+    """Aggregate reviews across all configured locations for the Reviews page."""
+    now = now or datetime.now(timezone.utc)
+    all_reviews: list[dict] = []
+    for loc in config.GHL_LOCATIONS:
+        for raw in get_reviews(loc["id"], limit=per_location_limit):
+            nr = _norm_review(raw)
+            nr["location"] = loc["label"] or ""
+            all_reviews.append(nr)
+
+    all_reviews.sort(key=lambda r: r["_sort"], reverse=True)
+    rated = [r for r in all_reviews if r["rating"] > 0]
+    count = len(all_reviews)
+    average = round(sum(r["rating"] for r in rated) / len(rated), 1) if rated else 0.0
+
+    distribution = {s: 0 for s in (5, 4, 3, 2, 1)}
+    for r in rated:
+        distribution[r["rating"]] += 1
+
+    sources: dict[str, int] = {}
+    for r in all_reviews:
+        sources[r["source"]] = sources.get(r["source"], 0) + 1
+
+    unreplied = sum(1 for r in all_reviews if not r["replied"])
+    since = now - timedelta(days=30)
+    recent_30 = sum(1 for r in all_reviews if r["_sort"] >= since)
+    capped = per_location_limit * max(1, len(config.GHL_LOCATIONS))
+
+    return {
+        "totals": {
+            "count": count,
+            "average": average,
+            "average_rounded": int(round(average)),
+            "rated": len(rated),
+            "unreplied": unreplied,
+            "replied": count - unreplied,
+            "sources": sources,
+            "distribution": distribution,
+            "recent_30": recent_30,
+        },
+        "recent": all_reviews[:12],
+        "sampled": count >= capped,
+        "generated_at": now.strftime("%b %-d, %Y at %-I:%M %p UTC"),
+    }
+
+
 # --- Diagnostics -------------------------------------------------------------
 
 _REDACT_RE = re.compile(r"token|secret|password|api[_-]?key|access|refresh", re.I)
@@ -338,5 +459,22 @@ def raw_debug() -> list[dict]:
             entry["posts_raw"] = _redact({"posts": list_posts(lid, limit=3)[:3]})
         except Exception as exc:  # noqa: BLE001
             entry["posts_error"] = str(exc)
+        out.append(entry)
+    return out
+
+
+def reviews_raw_debug() -> list[dict]:
+    """Credential-redacted raw reviews responses, for /reviews?debug=1."""
+    out: list[dict] = []
+    for loc in config.GHL_LOCATIONS:
+        entry: dict = {"location": loc}
+        try:
+            entry["reviews_raw"] = _redact(
+                _get("/reputation/reviews",
+                     params={"locationId": loc["id"], "limit": "5",
+                             "sortBy": "reviewDate", "sortOrder": "desc"})
+            )
+        except Exception as exc:  # noqa: BLE001
+            entry["reviews_error"] = str(exc)
         out.append(entry)
     return out
