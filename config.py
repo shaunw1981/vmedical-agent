@@ -170,6 +170,7 @@ DEFAULT_ROLE = "team_member"
 #   view_social       - see the social-media posting-activity dashboard
 #   view_reminders    - see the scheduled appointment reminders
 #   schedule_reminders- look up a contact and schedule an appointment reminder
+#   view_clients      - open client records (details, notes, appointment history)
 ROLE_CAPABILITIES = {
     "super_admin": {
         "view_messages",
@@ -179,6 +180,7 @@ ROLE_CAPABILITIES = {
         "view_social",
         "view_reminders",
         "schedule_reminders",
+        "view_clients",
     },
     "spa_manager": {
         "view_messages",
@@ -187,12 +189,14 @@ ROLE_CAPABILITIES = {
         "view_social",
         "view_reminders",
         "schedule_reminders",
+        "view_clients",
     },
     "team_member": {
         "view_messages",
         "respond_messages",
         "view_reminders",
         "schedule_reminders",
+        "view_clients",
     },
 }
 

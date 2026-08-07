@@ -328,6 +328,81 @@ def cancel_appointment(appt_id: int) -> None:
         conn.execute("UPDATE appointments SET status = 'cancelled' WHERE id = ?", (appt_id,))
 
 
+def list_appointments_for(ghl_contact_id: Optional[str] = None,
+                          email: Optional[str] = None,
+                          phone: Optional[str] = None) -> list[dict]:
+    """All appointments for one person (matched by GHL id, else email/phone)."""
+    clauses, params = [], []
+    if ghl_contact_id:
+        clauses.append("ghl_contact_id = ?"); params.append(ghl_contact_id)
+    if email:
+        clauses.append("lower(email) = ?"); params.append(email.lower())
+    if phone:
+        clauses.append("phone = ?"); params.append(phone)
+    if not clauses:
+        return []
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            f"SELECT * FROM appointments WHERE {' OR '.join(clauses)} ORDER BY appt_at DESC",
+            params,
+        ).fetchall()]
+
+
+def list_client_summaries() -> list[dict]:
+    """One row per distinct person we've scheduled, for the Clients list.
+
+    Grouped by GHL contact id when known, else email, else phone. Returns the
+    most recent name/contact info plus appointment counts and next/last dates.
+    """
+    with _connect() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM appointments ORDER BY created_at DESC"
+        ).fetchall()]
+    now = datetime.now().isoformat(timespec="minutes")
+    groups: dict[str, dict] = {}
+    for a in rows:
+        key = a.get("ghl_contact_id") or (a.get("email") or "").lower() or a.get("phone") or f"row{a['id']}"
+        g = groups.get(key)
+        if not g:
+            g = groups[key] = {
+                "key": key,
+                "contact_id": a.get("ghl_contact_id") or "",
+                "name": a.get("contact_name"),
+                "email": a.get("email") or "",
+                "phone": a.get("phone") or "",
+                "total": 0, "upcoming": 0,
+                "next_appt": None, "last_appt": None,
+            }
+        # First-seen (newest created) wins for display fields already set above.
+        g["contact_id"] = g["contact_id"] or (a.get("ghl_contact_id") or "")
+        g["email"] = g["email"] or (a.get("email") or "")
+        g["phone"] = g["phone"] or (a.get("phone") or "")
+        if a.get("status") != "cancelled":
+            g["total"] += 1
+            at = a.get("appt_at")
+            if at and at >= now:
+                g["upcoming"] += 1
+                if g["next_appt"] is None or at < g["next_appt"]:
+                    g["next_appt"] = at
+            if g["last_appt"] is None or (at and at > g["last_appt"]):
+                g["last_appt"] = at
+    return sorted(groups.values(),
+                  key=lambda g: g["next_appt"] or g["last_appt"] or "", reverse=True)
+
+
+def list_messages_for_phone(phone: str) -> list[dict]:
+    """After-hours call messages for a given phone number, newest first."""
+    if not phone:
+        return []
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT m.*, c.phone AS client_phone, c.name AS client_name "
+            "FROM messages m JOIN clients c ON c.id = m.client_id "
+            "WHERE c.phone = ? ORDER BY m.id DESC",
+            (phone,),
+        ).fetchall()]
+
+
 # --- Dashboard metrics (for the Overview charts) -----------------------------
 def status_breakdown() -> dict:
     """How many messages are still new vs. responded (all-time)."""

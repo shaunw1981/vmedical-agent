@@ -411,6 +411,78 @@ def create_appointment(location_id: str, calendar_id: str, contact_id: str,
     return {"id": str(aid) if aid else "", "raw": data}
 
 
+def get_contact(contact_id: str) -> dict:
+    """Full contact record, normalized for the client detail page."""
+    data = _get(f"/contacts/{contact_id}")
+    c = data.get("contact") if isinstance(data, dict) else None
+    c = c if isinstance(c, dict) else (data if isinstance(data, dict) else {})
+    name = _first(c, "contactName", "name") or \
+        f"{_first(c, 'firstName', default='') or ''} {_first(c, 'lastName', default='') or ''}".strip()
+    addr = ", ".join(str(p) for p in [
+        _first(c, "address1"), _first(c, "city"), _first(c, "state"),
+        _first(c, "postalCode"), _first(c, "country"),
+    ] if p)
+    tags = c.get("tags") if isinstance(c.get("tags"), list) else []
+    return {
+        "id": str(_first(c, "id", "_id", default=contact_id)),
+        "name": name or "(no name)",
+        "email": _first(c, "email", default=""),
+        "phone": _first(c, "phone", default=""),
+        "address": addr,
+        "tags": [str(t) for t in tags],
+        "created": _first(c, "dateAdded", "createdAt", default=""),
+        "source": _first(c, "source", default=""),
+    }
+
+
+def list_contact_notes(contact_id: str) -> list[dict]:
+    """A contact's notes, newest first."""
+    data = _get(f"/contacts/{contact_id}/notes")
+    rows = (data.get("notes") if isinstance(data, dict) else None) or []
+    out = [{"id": str(_first(n, "id", "_id", default="")),
+            "body": _first(n, "body", default=""),
+            "created": _first(n, "dateAdded", "createdAt", default="")} for n in rows]
+    out.sort(key=lambda n: n["created"] or "", reverse=True)
+    return out
+
+
+def add_contact_note(contact_id: str, body: str, user_id: Optional[str] = None) -> dict:
+    """Add a note to a contact's record."""
+    payload: dict = {"body": body}
+    if user_id:
+        payload["userId"] = user_id
+    return _post(f"/contacts/{contact_id}/notes", payload)
+
+
+def get_contact_appointments(contact_id: str) -> list[dict]:
+    """A contact's appointments from GoHighLevel, newest first."""
+    data = _get(f"/contacts/{contact_id}/appointments")
+    rows = (data.get("events") if isinstance(data, dict) else None)
+    if rows is None and isinstance(data, dict):
+        rows = data.get("appointments")
+    rows = rows or []
+    out = [{"id": str(_first(e, "id", "_id", default="")),
+            "title": _first(e, "title", default=""),
+            "start": _first(e, "startTime", "startAt", default=""),
+            "end": _first(e, "endTime", "endAt", default=""),
+            "status": _first(e, "appointmentStatus", "status", default="")} for e in rows]
+    out.sort(key=lambda e: e["start"] or "", reverse=True)
+    return out
+
+
+def clients_debug(contact_id: str) -> dict:
+    """Credential-redacted contact/notes/appointments dump, for /clients/{id}?debug=1."""
+    out: dict = {"contact_id": contact_id}
+    for label, fn in (("contact", lambda: _get(f"/contacts/{contact_id}")),
+                      ("notes", lambda: _get(f"/contacts/{contact_id}/notes")),
+                      ("appointments", lambda: _get(f"/contacts/{contact_id}/appointments"))):
+        try:
+            out[f"{label}_raw"] = _redact(fn())
+        except Exception as exc:  # noqa: BLE001
+            out[f"{label}_error"] = str(exc)
+    return out
+
+
 def reminders_debug(location_id: str, sample_query: str = "a") -> dict:
     """Credential-redacted raw contact/workflow responses, for /reminders/settings?debug=1."""
     out: dict = {"location_id": location_id}

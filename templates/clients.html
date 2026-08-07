@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Clients · Spa Dashboard{% endblock %}
+{% block nav %}clients{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1 style="margin:0">Clients</h1>
+  </div>
+  <p class="muted" style="margin:.1rem 0 1.1rem">
+    Open a client to see their contact details, notes, and appointment history.</p>
+
+  {% if search_enabled %}
+  <div class="card">
+    <label class="field" style="max-width:520px">
+      <span>Find a client</span>
+      <input type="search" id="client-search" autocomplete="off"
+             placeholder="Search GoHighLevel by name, email, or phone…">
+    </label>
+    <div id="search-results" class="search-results"></div>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2 style="margin-bottom:.7rem">Recent clients</h2>
+    {% if clients %}
+    <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Client</th><th>Contact</th><th>Next appointment</th><th>Appointments</th></tr></thead>
+      <tbody>
+      {% for c in clients %}
+      <tr>
+        <td>
+          {% if c.contact_id %}
+          <a class="who" href="/clients/{{ c.contact_id }}">{{ c.name }}</a>
+          {% else %}<span class="who">{{ c.name }}</span>{% endif %}
+        </td>
+        <td class="muted" style="font-size:.85rem">{{ c.email or c.phone or '—' }}</td>
+        <td>{% if c.next_appt %}{{ fmt_appt(c.next_appt) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td>{{ c.total }}{% if c.upcoming %} <span class="pill">{{ c.upcoming }} upcoming</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted" style="margin:.2rem 0">No clients yet. They'll appear here once reminders are
+      scheduled{% if search_enabled %}, or search above to open any GoHighLevel contact{% endif %}.</p>
+    {% endif %}
+  </div>
+
+  {% if search_enabled %}
+  <script>
+  (function () {
+    var box = document.getElementById('client-search');
+    var out = document.getElementById('search-results');
+    if (!box) return;
+    var t = null;
+    box.addEventListener('input', function () {
+      var q = box.value.trim();
+      clearTimeout(t);
+      if (q.length < 2) { out.innerHTML = ''; return; }
+      t = setTimeout(function () {
+        fetch('/api/contacts/search?q=' + encodeURIComponent(q))
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            var rows = (d.contacts || []);
+            if (!rows.length) { out.innerHTML = '<div class="sr-empty">No matches.</div>'; return; }
+            out.innerHTML = rows.map(function (c) {
+              var sub = [c.email, c.phone].filter(Boolean).join(' · ');
+              return '<a class="sr-item" href="/clients/' + encodeURIComponent(c.id) + '">' +
+                     '<span class="sr-name"></span><span class="sr-sub"></span></a>';
+            }).join('');
+            // Fill text safely (avoid HTML injection from contact fields).
+            var items = out.querySelectorAll('.sr-item');
+            rows.forEach(function (c, i) {
+              items[i].querySelector('.sr-name').textContent = c.name || '(no name)';
+              items[i].querySelector('.sr-sub').textContent = [c.email, c.phone].filter(Boolean).join(' · ');
+            });
+          })
+          .catch(function () { out.innerHTML = '<div class="sr-empty">Search failed.</div>'; });
+      }, 250);
+    });
+  })();
+  </script>
+  {% endif %}
+{% endblock %}

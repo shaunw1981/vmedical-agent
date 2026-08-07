@@ -26,6 +26,9 @@
     <a class="nav-link {{ 'active' if nav_current == 'messages' }}" href="/messages">
       Messages{% if new_count %}<span class="badge">{{ new_count }}</span>{% endif %}</a>
     {% endif %}
+    {% if can(user.role, 'view_clients') %}
+    <a class="nav-link {{ 'active' if nav_current == 'clients' }}" href="/clients">Clients</a>
+    {% endif %}
     {% if can(user.role, 'view_reminders') %}
     <a class="nav-link {{ 'active' if nav_current == 'reminders' }}" href="/reminders">Reminders</a>
     {% endif %}

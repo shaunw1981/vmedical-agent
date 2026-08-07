@@ -434,6 +434,80 @@ def api_appointment_types(request: Request):
     return {"types": [{"key": k, "label": l} for k, l in config.APPOINTMENT_TYPES]}
 
 
+# --- Client records ----------------------------------------------------------
+@app.get("/clients", response_class=HTMLResponse)
+def clients_page(request: Request):
+    user, resp = _guard(request, "view_clients")
+    if resp:
+        return resp
+    return templates.TemplateResponse(
+        "clients.html",
+        _ctx(request, user,
+             clients=db.list_client_summaries(),
+             fmt_appt=reminders.format_appt,
+             search_enabled=config.ghl_contacts_enabled()),
+    )
+
+
+@app.get("/clients/{contact_id}", response_class=HTMLResponse)
+def client_detail(request: Request, contact_id: str, debug: int = 0):
+    user, resp = _guard(request, "view_clients")
+    if resp:
+        return resp
+    if debug and config.can(user["role"], "manage_settings"):
+        import json
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(json.dumps(ghl.clients_debug(contact_id), indent=2, default=str))
+
+    contact, notes, ghl_appts, errors = None, [], [], {}
+    if config.ghl_contacts_enabled():
+        try:
+            contact = ghl.get_contact(contact_id)
+        except Exception as exc:  # noqa: BLE001
+            errors["contact"] = str(exc)
+        try:
+            notes = ghl.list_contact_notes(contact_id)
+        except Exception as exc:  # noqa: BLE001
+            errors["notes"] = str(exc)
+        try:
+            ghl_appts = ghl.get_contact_appointments(contact_id)
+        except Exception as exc:  # noqa: BLE001
+            errors["appointments"] = str(exc)
+
+    # Local records woven in: our scheduled reminders + after-hours calls.
+    phone = (contact or {}).get("phone", "")
+    email = (contact or {}).get("email", "")
+    local_appts = db.list_appointments_for(ghl_contact_id=contact_id, email=email, phone=phone)
+    calls = db.list_messages_for_phone(phone) if phone else []
+
+    return templates.TemplateResponse(
+        "client_detail.html",
+        _ctx(request, user,
+             contact_id=contact_id, contact=contact, notes=notes,
+             ghl_appts=ghl_appts, local_appts=local_appts, calls=calls,
+             errors=errors, fmt_appt=reminders.format_appt,
+             ghl_enabled=config.ghl_contacts_enabled(),
+             flash=request.session.pop("client_flash", None)),
+    )
+
+
+@app.post("/clients/{contact_id}/note")
+def client_add_note(request: Request, contact_id: str, body: str = Form(...)):
+    user, resp = _guard(request, "view_clients")
+    if resp:
+        return resp
+    text = (body or "").strip()
+    if not text:
+        request.session["client_flash"] = {"ok": False, "msg": "Note was empty — nothing added."}
+    else:
+        try:
+            ghl.add_contact_note(contact_id, text)
+            request.session["client_flash"] = {"ok": True, "msg": "Note added to GoHighLevel."}
+        except Exception as exc:  # noqa: BLE001
+            request.session["client_flash"] = {"ok": False, "msg": f"Couldn't add note: {exc}"}
+    return RedirectResponse(f"/clients/{contact_id}", status_code=303)
+
+
 # --- Message inbox -----------------------------------------------------------
 # A transcript line looks like "Speaker label: what they said". We split on the
 # FIRST colon so labels that contain their own dash/hyphen survive intact

@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}{{ contact.name if contact else 'Client' }} · Spa Dashboard{% endblock %}
+{% block nav %}clients{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1 style="margin:0">{{ contact.name if contact else 'Client record' }}</h1>
+    <a class="btn ghost" href="/clients">← All clients</a>
+  </div>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  {% if not ghl_enabled %}
+  <div class="banner">GoHighLevel isn't connected, so live contact details, notes, and
+    appointment history can't be loaded. Showing local records only.</div>
+  {% elif errors.contact %}
+  <div class="banner">⚠️ Couldn't load this contact from GoHighLevel.
+    <div style="margin-top:.3rem;font-size:.85rem;color:#7c2d12">{{ errors.contact }}</div></div>
+  {% endif %}
+
+  <div class="client-grid">
+    <div>
+      <!-- Contact details -->
+      <div class="card">
+        <h2>Contact details</h2>
+        {% if contact %}
+        <dl class="detail-list">
+          <div><dt>Email</dt><dd>{{ contact.email or '—' }}</dd></div>
+          <div><dt>Phone</dt><dd>{{ contact.phone or '—' }}</dd></div>
+          {% if contact.address %}<div><dt>Address</dt><dd>{{ contact.address }}</dd></div>{% endif %}
+          {% if contact.created %}<div><dt>Added</dt><dd>{{ contact.created.replace('T',' ')[:16] }}</dd></div>{% endif %}
+          {% if contact.source %}<div><dt>Source</dt><dd>{{ contact.source }}</dd></div>{% endif %}
+        </dl>
+        {% if contact.tags %}
+        <div class="tag-row">{% for t in contact.tags %}<span class="pill">{{ t }}</span>{% endfor %}</div>
+        {% endif %}
+        {% else %}
+        <p class="muted" style="margin:.2rem 0">No GoHighLevel details available for this client.</p>
+        {% endif %}
+      </div>
+
+      <!-- Notes -->
+      <div class="card">
+        <h2>Notes</h2>
+        {% if can(user.role, 'view_clients') and ghl_enabled and not errors.contact %}
+        <form method="post" action="/clients/{{ contact_id }}/note" class="note-form">
+          <textarea name="body" rows="3" required placeholder="Add a note to this client's record…"></textarea>
+          <div style="text-align:right;margin-top:.5rem"><button class="btn" type="submit">Add note</button></div>
+        </form>
+        {% endif %}
+        {% if errors.notes %}
+        <p class="muted" style="font-size:.85rem">Couldn't load notes: {{ errors.notes }}</p>
+        {% elif notes %}
+        <div class="note-list">
+          {% for n in notes %}
+          <div class="note-item">
+            {% if n.created %}<div class="note-when muted">{{ n.created.replace('T',' ')[:16] }}</div>{% endif %}
+            <div class="note-body">{{ n.body }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="muted" style="margin:.2rem 0">No notes yet.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div>
+      <!-- Appointment history -->
+      <div class="card">
+        <h2>Appointment history</h2>
+        {% if errors.appointments %}
+        <p class="muted" style="font-size:.85rem">Couldn't load GoHighLevel appointments: {{ errors.appointments }}</p>
+        {% endif %}
+        {% if ghl_appts %}
+        <div class="hist-list">
+          {% for a in ghl_appts %}
+          <div class="hist-item">
+            <div class="hist-main">{{ a.title or 'Appointment' }}</div>
+            <div class="meta muted">{{ a.start.replace('T',' ')[:16] if a.start else '' }}
+              {% if a.status %}· {{ a.status }}{% endif %}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% elif not errors.appointments %}
+        <p class="muted" style="margin:.2rem 0">No GoHighLevel appointments on record.</p>
+        {% endif %}
+      </div>
+
+      <!-- Reminders scheduled here -->
+      <div class="card">
+        <h2>Reminders scheduled here</h2>
+        {% if local_appts %}
+        <div class="hist-list">
+          {% for a in local_appts %}
+          <div class="hist-item {{ 'is-cancelled' if a.status == 'cancelled' }}">
+            <div class="hist-main">{{ a.type_label }}</div>
+            <div class="meta muted">{{ fmt_appt(a.appt_at) }}
+              · {{ 'Cancelled' if a.status == 'cancelled' else 'Scheduled' }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="muted" style="margin:.2rem 0">No reminders scheduled from this dashboard.</p>
+        {% endif %}
+      </div>
+
+      <!-- After-hours calls -->
+      {% if calls %}
+      <div class="card">
+        <h2>After-hours calls</h2>
+        <div class="hist-list">
+          {% for m in calls %}
+          <a class="hist-item" href="/messages" style="text-decoration:none;color:inherit">
+            <div class="hist-main">{{ (m.summary or 'Call transcript')[:80] }}</div>
+            <div class="meta muted">{{ m.created_at.replace('T',' ')[:16] }}
+              · {{ 'Responded' if m.status == 'responded' else 'New' }}</div>
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}
