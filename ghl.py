@@ -18,6 +18,7 @@ base, and the location id(s) in .env — see config.py / .env.example.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
@@ -111,6 +112,78 @@ def list_posts(location_id: str, limit: int = 200) -> list[dict]:
     inner = data.get("results", data) if isinstance(data, dict) else {}
     posts = inner.get("posts") if isinstance(inner, dict) else None
     return posts or []
+
+
+def get_statistics(
+    location_id: str,
+    account_ids: list[str],
+    current: Optional[dict] = None,
+    previous: Optional[dict] = None,
+) -> dict:
+    """
+    Advanced Analytics for a location's accounts (reach, impressions, followers,
+    likes, comments, shares). `current`/`previous` are {"startDate","endDate"}
+    ranges; GHL defaults to the last 7 days vs. the previous 7 if omitted.
+
+    NOTE: the exact request/response schema is confirmed on first live call via
+    the diagnostic view (see raw_debug); the metric mapping is finalised then.
+    """
+    body: dict = {"accounts": account_ids}
+    if current:
+        body["currentRange"] = current
+    if previous:
+        body["prevRange"] = previous
+    return _post(f"/social-media-posting/{location_id}/statistics/", body)
+
+
+# --- Diagnostics -------------------------------------------------------------
+
+_REDACT_RE = re.compile(r"token|secret|password|api[_-]?key|access|refresh", re.I)
+
+
+def _redact(obj: Any) -> Any:
+    """Strip anything that looks like a credential before we ever display it."""
+    if isinstance(obj, dict):
+        return {k: ("***" if _REDACT_RE.search(k) else _redact(v)) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_redact(x) for x in obj]
+    return obj
+
+
+def raw_debug() -> list[dict]:
+    """
+    Return the raw (credential-redacted) API responses for each location so the
+    exact field shapes can be confirmed. Used by the /social?debug=1 view.
+    """
+    out: list[dict] = []
+    for loc in config.GHL_LOCATIONS:
+        lid = loc["id"]
+        entry: dict = {"location": loc}
+        try:
+            entry["accounts_raw"] = _redact(_get(f"/social-media-posting/{lid}/accounts"))
+        except Exception as exc:  # noqa: BLE001
+            entry["accounts_error"] = str(exc)
+        try:
+            entry["posts_raw"] = _redact(_post(
+                f"/social-media-posting/{lid}/posts/list",
+                {"type": "all", "accounts": [], "skip": 0, "limit": 3},
+            ))
+        except Exception as exc:  # noqa: BLE001
+            entry["posts_error"] = str(exc)
+        acct_ids: list[str] = []
+        try:
+            for a in get_accounts(lid):
+                aid = str(_first(a, "id", "_id", "accountId", default=""))
+                if aid:
+                    acct_ids.append(aid)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            entry["statistics_raw"] = _redact(get_statistics(lid, acct_ids))
+        except Exception as exc:  # noqa: BLE001
+            entry["statistics_error"] = str(exc)
+        out.append(entry)
+    return out
 
 
 # --- Owner-friendly aggregation ---------------------------------------------

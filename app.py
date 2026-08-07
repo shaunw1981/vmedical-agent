@@ -143,10 +143,21 @@ def dashboard(request: Request):
 
 # --- Social media metrics ----------------------------------------------------
 @app.get("/social", response_class=HTMLResponse)
-def social(request: Request):
+def social(request: Request, debug: int = 0):
     user, resp = _guard(request, "view_social")
     if resp:
         return resp
+    # Diagnostic dump (super admin only) — used to confirm GHL's exact response
+    # shapes so the metrics can be mapped precisely on first connect.
+    if debug and config.can(user["role"], "manage_settings"):
+        import json
+        from fastapi.responses import PlainTextResponse
+        if not config.ghl_social_enabled():
+            return PlainTextResponse("GHL not configured (set GHL_API_TOKEN and GHL_LOCATIONS).")
+        try:
+            return PlainTextResponse(json.dumps(ghl.raw_debug(), indent=2, default=str))
+        except Exception as exc:  # noqa: BLE001
+            return PlainTextResponse(f"ERROR: {exc}", status_code=500)
     data = None
     error = None
     if config.ghl_social_enabled():
