@@ -24,6 +24,7 @@ import auth
 import config
 import db
 import email_monitor
+import ghl
 import obsidian
 
 app = FastAPI(title="vmedical-agent dashboard", version="3.0.0")
@@ -137,6 +138,31 @@ def dashboard(request: Request):
     return templates.TemplateResponse(
         "dashboard.html",
         _ctx(request, user, responded_count=len(db.list_messages("responded"))),
+    )
+
+
+# --- Social media metrics ----------------------------------------------------
+@app.get("/social", response_class=HTMLResponse)
+def social(request: Request):
+    user, resp = _guard(request, "view_social")
+    if resp:
+        return resp
+    data = None
+    error = None
+    if config.ghl_social_enabled():
+        try:
+            data = ghl.social_overview()
+        except Exception as exc:  # noqa: BLE001
+            error = str(exc)
+    return templates.TemplateResponse(
+        "social.html",
+        _ctx(
+            request,
+            user,
+            social=data,
+            social_error=error,
+            social_enabled=config.ghl_social_enabled(),
+        ),
     )
 
 

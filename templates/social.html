@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}Social · Spa Dashboard{% endblock %}
+{% block nav_social %}active{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1 style="margin:0">Social media</h1>
+    {% if social %}<span class="muted" style="font-size:.82rem">Updated {{ social.generated_at }}</span>{% endif %}
+  </div>
+  <p class="muted" style="margin:.1rem 0 1.1rem">Posting activity across your connected pages, from GoHighLevel.</p>
+
+  {% if not social_enabled %}
+    {# ---- Not connected yet: setup instructions ---- #}
+    <div class="card">
+      <h2>Connect GoHighLevel to turn this on</h2>
+      <p class="muted" style="margin-top:.2rem">This tab reads your social posting
+        activity from GoHighLevel. It needs a read-only key so it can look, but
+        never post or change anything.</p>
+      <ol class="setup-steps">
+        <li>In GoHighLevel, open the sub-account → <strong>Settings → Private Integrations</strong>.</li>
+        <li>Create a token and tick the two read-only scopes:
+            <strong>View Social Planner Accounts</strong> and
+            <strong>View Social Planner Posts</strong>.</li>
+        <li>Copy the token, and grab the <strong>Location ID</strong>
+            (Settings → Business Profile, or the id in the GHL web address).</li>
+        <li>Double-click <code>open-settings.command</code> and add:
+            <br><code>GHL_API_TOKEN=your-token</code>
+            <br><code>GHL_LOCATIONS=Kentville=locationId</code>
+            (add more locations comma-separated).</li>
+        <li>Double-click <code>restart.command</code>, then reload this page.</li>
+      </ol>
+      <p class="note-inline">Heads-up on what this shows: GoHighLevel's API reports
+        <strong>posting activity</strong> (what's been published and what's queued).
+        Audience <strong>reach, engagement, follower counts, and Google star ratings</strong>
+        aren't available through GoHighLevel — those need Facebook &amp; Google
+        connected directly, which we can scope as a later phase.</p>
+    </div>
+
+  {% elif social_error %}
+    {# ---- Configured but the API call failed ---- #}
+    <div class="banner">⚠️ Couldn't load social data from GoHighLevel.
+      <div style="margin-top:.4rem;font-size:.85rem;color:#7c2d12">{{ social_error }}</div>
+    </div>
+    <p class="muted">Common causes: the token is missing a Social Planner scope, the
+      Location ID is wrong, or the token was created in a different sub-account.
+      Send me this message and I'll help pin it down.</p>
+
+  {% elif social and social.totals.accounts == 0 %}
+    <div class="card">
+      <h2>No connected pages found</h2>
+      <p class="muted">The key is working, but this location has no social accounts
+        connected in GoHighLevel's Social Planner yet — or the Location ID points
+        somewhere else. Connect the Facebook / Google pages in GHL, or check the
+        <code>GHL_LOCATIONS</code> id.</p>
+    </div>
+
+  {% else %}
+    {# ---- Live data ---- #}
+    <div class="stat-grid">
+      <div class="stat-tile">
+        <div class="n">{{ social.totals.accounts }}</div>
+        <div class="k">Connected pages</div>
+      </div>
+      <div class="stat-tile">
+        <div class="n">{{ social.totals.posts_30d }}</div>
+        <div class="k">Posts published · last 30 days</div>
+      </div>
+      <div class="stat-tile">
+        <div class="n">{{ social.totals.scheduled }}</div>
+        <div class="k">Scheduled &amp; waiting to go out</div>
+      </div>
+      <div class="stat-tile {{ 'warn' if social.totals.failed_30d }}">
+        <div class="n">{{ social.totals.failed_30d }}</div>
+        <div class="k">Failed to post · last 30 days</div>
+      </div>
+    </div>
+
+    {% if social.weekly_max %}
+    <div class="card">
+      <h2 style="margin-bottom:.2rem">Posting activity — last 8 weeks</h2>
+      <p class="muted" style="font-size:.82rem;margin:.1rem 0 .3rem">Total posts published each week, across every page.</p>
+      <div class="spark">
+        {% for v in social.weekly %}
+          <div class="bar {{ 'empty' if not v }}" style="height:{{ (v / social.weekly_max * 100)|round(0,'floor') }}%"
+               title="{{ v }} post(s)"></div>
+        {% endfor %}
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--muted);margin-top:.3rem">
+        <span>8 weeks ago</span><span>this week</span>
+      </div>
+    </div>
+    {% endif %}
+
+    {% for loc in social.locations %}
+      <div class="loc-head">{{ loc.label }}</div>
+      {% if not loc.accounts %}
+        <p class="muted" style="margin-top:0">No connected pages for this location.</p>
+      {% else %}
+      <div class="acct-grid">
+        {% for a in loc.accounts %}
+        <div class="acct-card">
+          <div class="acct-top">
+            <div class="acct-av">
+              {% if a.avatar %}<img src="{{ a.avatar }}" alt="">{% else %}{{ a.name[0]|upper }}{% endif %}
+            </div>
+            <div>
+              <div class="acct-name">{{ a.name }}</div>
+              <span class="plat {{ a.platform|lower|replace(' ','-')|replace('(','')|replace(')','') }}">{{ a.platform }}</span>
+            </div>
+          </div>
+
+          <div class="acct-metrics">
+            <div class="m"><div class="mn">{{ a.posts_30d }}</div><div class="mk">posts · 30d</div></div>
+            <div class="m"><div class="mn">{{ a.posts_7d }}</div><div class="mk">this week</div></div>
+            <div class="m"><div class="mn">{{ a.scheduled }}</div><div class="mk">scheduled</div></div>
+          </div>
+
+          <div class="acct-line">
+            {% if a.freshness == 'good' %}<span class="fresh good">Active</span>
+            {% elif a.freshness == 'aging' %}<span class="fresh aging">Getting quiet</span>
+            {% elif a.freshness == 'stale' %}<span class="fresh stale">Gone quiet</span>
+            {% else %}<span class="fresh none">No recent posts</span>{% endif %}
+            {% if a.last_post_at %}&nbsp; Last post {{ a.last_post_at }}{% if a.days_since is not none %} ({{ a.days_since }}d ago){% endif %}{% endif %}
+          </div>
+          {% if a.next_scheduled_at %}
+          <div class="acct-line">Next scheduled: {{ a.next_scheduled_at }}</div>
+          {% endif %}
+          {% if a.failed_30d %}
+          <div class="acct-line" style="color:#b45309">⚠ {{ a.failed_30d }} failed post(s) in the last 30 days</div>
+          {% endif %}
+
+          {% if social.weekly_max %}
+          <div class="spark">
+            {% for v in a.weekly %}
+              <div class="bar {{ 'empty' if not v }}" style="height:{{ (v / social.weekly_max * 100)|round(0,'floor') }}%"></div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    {% endfor %}
+
+    <p class="note-inline">These numbers reflect <strong>posting activity</strong>
+      through GoHighLevel's Social Planner. Audience <strong>reach, engagement,
+      follower growth, and Google star ratings</strong> aren't available through
+      GoHighLevel's API — connecting Facebook &amp; Google directly is a separate
+      phase we can plan when you're ready.</p>
+  {% endif %}
+{% endblock %}

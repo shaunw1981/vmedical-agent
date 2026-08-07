@@ -42,6 +42,38 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 # Optional shared secret so only GoHighLevel can post to the call webhook.
 GHL_WEBHOOK_SECRET = os.environ.get("GHL_WEBHOOK_SECRET", "").strip()
 
+# --- GoHighLevel social metrics (Social Planner API) -------------------------
+# A sub-account Private Integration Token (GHL -> Settings -> Private
+# Integrations) with the read-only Social Planner scopes
+# ("View Social Planner Accounts" + "View Social Planner Posts"). Leave blank
+# to keep the Social tab in its "not connected yet" setup state.
+GHL_API_TOKEN = os.environ.get("GHL_API_TOKEN", "").strip()
+GHL_API_BASE = os.environ.get(
+    "GHL_API_BASE", "https://services.leadconnectorhq.com"
+).rstrip("/")
+GHL_API_VERSION = os.environ.get("GHL_API_VERSION", "2021-07-28").strip()
+
+# One or more GHL location (sub-account) ids whose social pages to show.
+# Optionally label each so the dashboard reads nicely. Comma-separated:
+#   GHL_LOCATIONS=abc123def456
+#   GHL_LOCATIONS=Kentville=abc123,New Minas=def456
+_locs_raw = os.environ.get("GHL_LOCATIONS", "").strip()
+GHL_LOCATIONS: list[dict] = []
+for _part in _locs_raw.split(","):
+    _part = _part.strip()
+    if not _part:
+        continue
+    if "=" in _part:
+        _label, _lid = _part.split("=", 1)
+        GHL_LOCATIONS.append({"label": _label.strip(), "id": _lid.strip()})
+    else:
+        GHL_LOCATIONS.append({"label": "", "id": _part})
+
+
+def ghl_social_enabled() -> bool:
+    """True once a token and at least one location id are configured."""
+    return bool(GHL_API_TOKEN and GHL_LOCATIONS)
+
 # --- Email monitor (reads the "AI Call Recap" emails) ------------------------
 # The app checks this mailbox on a schedule and turns each new recap email into
 # a dashboard message + Obsidian note. Leave IMAP_USER/IMAP_PASSWORD blank to
@@ -76,17 +108,20 @@ DEFAULT_ROLE = "team_member"
 #   respond_messages  - mark a message as responded
 #   manage_users      - invite/remove team members and change their roles
 #   manage_settings   - change system settings (future)
+#   view_social       - see the social-media posting-activity dashboard
 ROLE_CAPABILITIES = {
     "super_admin": {
         "view_messages",
         "respond_messages",
         "manage_users",
         "manage_settings",
+        "view_social",
     },
     "spa_manager": {
         "view_messages",
         "respond_messages",
         "manage_users",  # managers can manage team members (but not super admins)
+        "view_social",
     },
     "team_member": {
         "view_messages",

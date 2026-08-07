@@ -159,6 +159,20 @@ try again.
 > on the Mac. If your copy predates this file, do the ZIP download **once** to
 > get it, then use the button for every update after that.
 
+## Social tab (optional — GoHighLevel posting activity)
+The **Social** tab shows how consistently each connected page is posting, pulled
+from GoHighLevel. To turn it on:
+1. In GHL: **Settings → Private Integrations** → create a token with the two
+   read-only scopes **View Social Planner Accounts** and **View Social Planner Posts**.
+2. Grab each sub-account's **Location ID**.
+3. `open-settings.command` → add `GHL_API_TOKEN=...` and
+   `GHL_LOCATIONS=Label=locationId` (comma-separate multiple locations) → save.
+4. `restart.command`, then open the Social tab.
+
+Until then, the tab shows these same instructions. Note: GoHighLevel's API only
+reports **posting activity** — reach, engagement, followers, and Google star
+ratings would need Facebook/Google connected directly (a later phase).
+
 ## Backups
 - The **Obsidian vault** is a folder — back it up (Time Machine / a copy).
 - Dashboard data: `~/vmedical-agent/data/app.db`.

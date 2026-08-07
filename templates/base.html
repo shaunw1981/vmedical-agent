@@ -105,6 +105,53 @@
     .raw-transcript { white-space:pre-wrap; margin-top:.6rem; font-size:.9rem;
                       line-height:1.5; }
     .responded-by { margin-top:.6rem; font-size:.8rem; }
+
+    /* Social page */
+    .stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+                 gap:1rem; margin-bottom:1.2rem; }
+    .stat-tile { background:var(--card); border:1px solid var(--line); border-radius:14px;
+                 padding:1rem 1.1rem; }
+    .stat-tile .n { font-size:2rem; font-weight:700; line-height:1; }
+    .stat-tile .k { color:var(--muted); font-size:.82rem; margin-top:.35rem; }
+    .stat-tile.warn .n { color:#b45309; }
+    .stat-tile.warn { background:#fffbeb; border-color:#fde68a; }
+    .loc-head { font-size:1.05rem; font-weight:700; margin:1.4rem 0 .7rem; color:#2b332e; }
+    .acct-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+                 gap:1rem; }
+    .acct-card { background:var(--card); border:1px solid var(--line); border-radius:14px;
+                 padding:1rem 1.1rem; box-shadow:0 1px 2px rgba(20,30,25,.05); }
+    .acct-top { display:flex; align-items:center; gap:.6rem; margin-bottom:.7rem; }
+    .acct-av { width:36px; height:36px; border-radius:50%; background:var(--brandgreen);
+               color:#fff; display:flex; align-items:center; justify-content:center;
+               font-weight:700; font-size:.9rem; flex:0 0 auto; overflow:hidden; }
+    .acct-av img { width:100%; height:100%; object-fit:cover; }
+    .acct-name { font-weight:700; font-size:.95rem; line-height:1.15; }
+    .plat { display:inline-block; font-size:.66rem; font-weight:700; text-transform:uppercase;
+            letter-spacing:.04em; padding:.1rem .45rem; border-radius:999px;
+            background:#eef0ed; color:#5f7060; margin-top:.15rem; }
+    .plat.facebook { background:#e7effb; color:#1b5fb0; }
+    .plat.google-business { background:#e9f3ea; color:#2e7d46; }
+    .plat.instagram { background:#fdecf3; color:#b83280; }
+    .acct-metrics { display:flex; gap:1.1rem; margin:.5rem 0 .3rem; }
+    .acct-metrics .m .mn { font-size:1.3rem; font-weight:700; line-height:1; }
+    .acct-metrics .m .mk { color:var(--muted); font-size:.72rem; margin-top:.2rem; }
+    .acct-line { font-size:.82rem; color:var(--muted); margin-top:.35rem; }
+    .fresh { display:inline-block; font-size:.72rem; font-weight:700; padding:.08rem .5rem;
+             border-radius:999px; }
+    .fresh.good  { background:#dcfce7; color:#166534; }
+    .fresh.aging { background:#fef9c3; color:#854d0e; }
+    .fresh.stale { background:#fee2e2; color:#991b1b; }
+    .fresh.none  { background:#eef0ed; color:#6b7280; }
+    .spark { display:flex; align-items:flex-end; gap:3px; height:34px; margin-top:.6rem; }
+    .spark .bar { flex:1; background:var(--brandgreen); border-radius:2px 2px 0 0;
+                  min-height:2px; opacity:.85; }
+    .spark .bar.empty { background:#e5e7eb; }
+    .note-inline { font-size:.82rem; color:var(--muted); background:#f7f8f9;
+                   border:1px solid var(--line); border-radius:10px; padding:.7rem .9rem;
+                   margin-top:1.2rem; line-height:1.5; }
+    .setup-steps { margin:.6rem 0 0; padding-left:1.1rem; line-height:1.7; }
+    .setup-steps code { background:#eef0ed; padding:.05rem .3rem; border-radius:4px;
+                        font-size:.85em; }
   </style>
 </head>
 <body>
@@ -121,6 +168,9 @@
       <a href="/messages" class="{% block nav_msg %}{% endblock %}">
         Messages{% if new_count %} <span class="pill">{{ new_count }}</span>{% endif %}
       </a>
+      {% endif %}
+      {% if can(user.role, 'view_social') %}
+      <a href="/social" class="{% block nav_social %}{% endblock %}">Social</a>
       {% endif %}
       {% if can(user.role, 'manage_users') %}
       <a href="/admin/users" class="{% block nav_users %}{% endblock %}">Team</a>
