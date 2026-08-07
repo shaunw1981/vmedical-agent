@@ -57,7 +57,7 @@ PY
 fi
 
 # 4. Make the helper scripts runnable.
-chmod +x macmini/start.sh macmini/restart.command macmini/open-settings.command 2>/dev/null || true
+chmod +x macmini/start.sh macmini/restart.command macmini/open-settings.command macmini/update.command 2>/dev/null || true
 
 # 5. Install the background service (a macOS "LaunchAgent").
 echo "==> Setting the app to run automatically..."

@@ -36,7 +36,7 @@ GoHighLevel AI receptionist ─▶ Dashboard (Mac Mini) ─▶ Obsidian vault (b
 | `db.py`                  | Local database: users, clients (by phone), messages.         |
 | `obsidian.py`            | Files call transcripts into the vault, per client.           |
 | `templates/`             | The dashboard pages.                                         |
-| `macmini/`               | Double-click installer + auto-start for the Mac Mini.        |
+| `macmini/`               | Double-click installer, one-click updater, + auto-start.     |
 | `SETUP-MACMINI.md`       | Full non-developer setup guide.                              |
 | `.env.example`           | Settings template.                                           |
 

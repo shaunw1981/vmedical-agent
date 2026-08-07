@@ -7,11 +7,12 @@ copy that lives on the Mac.
 
 Total time: about an hour the first time. Only cost: a domain name (~$10/year).
 
-Three double-click helpers live in the `macmini` folder so you rarely need
+Four double-click helpers live in the `macmini` folder so you rarely need
 Terminal:
 - **`install.command`** — sets everything up (Stage 1).
 - **`open-settings.command`** — opens the settings file in TextEdit (Stage 5).
 - **`restart.command`** — applies settings after you change them.
+- **`update.command`** — pulls the newest version and restarts (see below).
 
 > First time you double-click any `.command` file, macOS may block it. Fix:
 > right-click the file → **Open** → **Open**. You only do this once per file.
@@ -139,6 +140,24 @@ in Obsidian under **vMedical Agent → Clients → (caller) → Calls**.
 - Change settings: double-click **`open-settings.command`**, then
   **`restart.command`**.
 - App log (if something seems off): `~/vmedical-agent/data/app.log`.
+
+## Updating to the newest version (the easy way)
+When Shaun/Claude says there's a new version, you no longer download a ZIP.
+Just:
+
+1. Open **Home folder → vmedical-agent → macmini**.
+2. Double-click **`update.command`**.
+3. Wait for **"Done! You're on the latest version."**
+4. In your browser, hard-refresh the dashboard: **Cmd + Shift + R**.
+
+That's it. It downloads the newest code, restarts the app, and **never touches
+your settings (`.env`) or your data** (database + Obsidian notes stay exactly as
+they are). If it can't reach the internet it changes nothing and tells you to
+try again.
+
+> One-time note: the very first time, you still need `update.command` to *exist*
+> on the Mac. If your copy predates this file, do the ZIP download **once** to
+> get it, then use the button for every update after that.
 
 ## Backups
 - The **Obsidian vault** is a folder — back it up (Time Machine / a copy).
