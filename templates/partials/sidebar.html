@@ -34,12 +34,5 @@
     {% endif %}
   </nav>
 
-  {% if can(user.role, 'view_reviews') %}
-  <div class="nav-group">
-    <div class="nav-heading">Feedback</div>
-    <a class="nav-link {{ 'active' if nav_current == 'reviews' }}" href="/reviews">Reviews</a>
-  </div>
-  {% endif %}
-
   <a class="nav-link logout" href="/logout">Log out</a>
 </aside>

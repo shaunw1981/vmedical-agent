@@ -35,16 +35,9 @@ EXTRA_ALLOWED_EMAILS = [e.strip() for e in _extra_raw.split(",") if e.strip()]
 # email is always allowed to sign in, even if its domain isn't listed above.
 SUPER_ADMIN_EMAIL = os.environ.get("SUPER_ADMIN_EMAIL", "").strip().lower()
 
-# Google OAuth credentials (from Google Cloud Console). Used both for
-# "Sign in with Google" and (optionally) the Google Business reviews connection.
+# Google OAuth credentials (from Google Cloud Console).
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
-
-# Optional: pin which Google Business account/location to read reviews from.
-# Leave blank to auto-pick the first account + first location after connecting.
-# Values are the numeric IDs (the part after "accounts/" and "locations/").
-GOOGLE_BUSINESS_ACCOUNT = os.environ.get("GOOGLE_BUSINESS_ACCOUNT", "").strip()
-GOOGLE_BUSINESS_LOCATION = os.environ.get("GOOGLE_BUSINESS_LOCATION", "").strip()
 
 # Optional shared secret so only GoHighLevel can post to the call webhook.
 GHL_WEBHOOK_SECRET = os.environ.get("GHL_WEBHOOK_SECRET", "").strip()
@@ -79,11 +72,6 @@ for _part in _locs_raw.split(","):
 
 def ghl_social_enabled() -> bool:
     """True once a token and at least one location id are configured."""
-    return bool(GHL_API_TOKEN and GHL_LOCATIONS)
-
-
-def ghl_reviews_enabled() -> bool:
-    """Reviews use the same token + locations (plus the reputation read scope)."""
     return bool(GHL_API_TOKEN and GHL_LOCATIONS)
 
 # --- Email monitor (reads the "AI Call Recap" emails) ------------------------
@@ -121,8 +109,6 @@ DEFAULT_ROLE = "team_member"
 #   manage_users      - invite/remove team members and change their roles
 #   manage_settings   - change system settings (future)
 #   view_social       - see the social-media posting-activity dashboard
-#   view_reviews      - see the Google/Facebook reviews (reputation) dashboard
-#   respond_reviews   - post a public reply to a review (needs GHL write scope)
 ROLE_CAPABILITIES = {
     "super_admin": {
         "view_messages",
@@ -130,16 +116,12 @@ ROLE_CAPABILITIES = {
         "manage_users",
         "manage_settings",
         "view_social",
-        "view_reviews",
-        "respond_reviews",
     },
     "spa_manager": {
         "view_messages",
         "respond_messages",
         "manage_users",  # managers can manage team members (but not super admins)
         "view_social",
-        "view_reviews",
-        "respond_reviews",
     },
     "team_member": {
         "view_messages",
