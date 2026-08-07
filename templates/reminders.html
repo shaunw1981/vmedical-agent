@@ -44,11 +44,21 @@
     {% if can(user.role, 'schedule_reminders') %}
     <div class="card">
       <h2>Schedule a reminder</h2>
-      <form method="post" action="/reminders" class="form-grid" autocomplete="off">
+      <form method="post" action="/reminders" class="appt-form" autocomplete="off">
         <label class="field">
           <span>Contact name</span>
           <input type="text" name="contact_name" required placeholder="Jane Doe">
         </label>
+        <div class="field-row">
+          <label class="field">
+            <span>Email</span>
+            <input type="email" name="email" placeholder="jane@example.com">
+          </label>
+          <label class="field">
+            <span>Phone</span>
+            <input type="tel" name="phone" placeholder="(902) 555-0123">
+          </label>
+        </div>
         <label class="field">
           <span>Appointment type</span>
           <select name="type_key" required>
@@ -59,20 +69,12 @@
           </select>
         </label>
         <label class="field">
-          <span>Email</span>
-          <input type="email" name="email" placeholder="jane@example.com">
-        </label>
-        <label class="field">
-          <span>Phone</span>
-          <input type="tel" name="phone" placeholder="(902) 555-0123">
-        </label>
-        <label class="field">
           <span>Appointment date &amp; time</span>
           <input type="datetime-local" name="appt_at" required>
         </label>
-        <div class="field field-actions">
+        <div class="appt-actions">
           <button class="btn" type="submit">Schedule reminder</button>
-          <span class="muted" style="font-size:.76rem">Email or phone is required.</span>
+          <span class="muted" style="font-size:.8rem">Email or phone is required.</span>
         </div>
       </form>
     </div>
