@@ -31,9 +31,20 @@ app = FastAPI(title="vmedical-agent dashboard", version="3.0.0")
 app.add_middleware(SessionMiddleware, secret_key=config.SESSION_SECRET)
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+
+def _fmt_num(n) -> str:
+    """Format a number with thousands separators for display (e.g. 12,340)."""
+    try:
+        f = float(n)
+        return f"{int(f):,}" if f == int(f) else f"{f:,.1f}"
+    except (TypeError, ValueError):
+        return str(n)
+
+
 # Make role/permission helpers available inside every template.
 templates.env.globals.update(
-    can=config.can, ROLE_LABELS=config.ROLE_LABELS, ROLES=config.ROLES
+    can=config.can, ROLE_LABELS=config.ROLE_LABELS, ROLES=config.ROLES, fmt=_fmt_num
 )
 
 

@@ -1,19 +1,18 @@
 """
-ghl.py — reads social-media posting activity from GoHighLevel.
+ghl.py — reads social-media analytics from GoHighLevel's Social Planner.
 
-GoHighLevel's public API only exposes the *Social Planner* (publishing) data:
-which accounts are connected, and the posts you've published/scheduled through
-GHL. It does NOT expose native platform analytics — reach, impressions,
-follower counts, post likes/comments, or Google review ratings. Those live in
-Facebook's and Google's own APIs and would be a separate integration.
+Two endpoints do the work (schemas confirmed against GHL's public OpenAPI):
+  • GET  /social-media-posting/{locationId}/accounts    — connected pages
+  • POST /social-media-posting/statistics?locationId=…  — Advanced Analytics:
+        body {"profileIds": [...], "platforms": [...]}; returns totals
+        (posts, likes, followers, impressions, comments) and breakdowns for
+        reach / impressions / engagement / posts, each with the change vs the
+        previous 7 days. profileIds come from each account's "profileId".
+  • POST /social-media-posting/{locationId}/posts/list  — recent/scheduled posts
+        (used for "last posted" and "scheduled" context).
 
-So this module turns "posting activity" into numbers a business owner cares
-about: are we consistently showing up on each page, what's queued to go out,
-and did anything fail to post.
-
-Auth: a sub-account **Private Integration Token** (GHL → Settings → Private
-Integrations) with the read-only Social Planner scopes. Configure it, the API
-base, and the location id(s) in .env — see config.py / .env.example.
+Auth: a sub-account Private Integration Token with the read-only Social Planner
+scopes. See config.py / .env.example.
 """
 
 from __future__ import annotations
@@ -38,17 +37,17 @@ def _headers() -> dict:
     }
 
 
-def _get(path: str) -> dict:
+def _get(path: str, params: Optional[dict] = None) -> dict:
     url = f"{config.GHL_API_BASE}{path}"
     with httpx.Client(timeout=20) as client:
-        r = client.get(url, headers=_headers())
+        r = client.get(url, headers=_headers(), params=params)
     return _handle(r)
 
 
-def _post(path: str, body: dict) -> dict:
+def _post(path: str, body: dict, params: Optional[dict] = None) -> dict:
     url = f"{config.GHL_API_BASE}{path}"
     with httpx.Client(timeout=20) as client:
-        r = client.post(url, headers=_headers(), json=body)
+        r = client.post(url, headers=_headers(), params=params, json=body)
     return _handle(r)
 
 
@@ -66,20 +65,26 @@ def _handle(r: httpx.Response) -> dict:
         return {}
 
 
-# --- Field helpers (GHL field names vary, so read them tolerantly) -----------
+# --- Field helpers -----------------------------------------------------------
 
 def _first(d: dict, *keys: str, default=None):
     for k in keys:
-        if k in d and d[k] not in (None, ""):
+        if isinstance(d, dict) and k in d and d[k] not in (None, ""):
             return d[k]
     return default
 
 
+def _num(v: Any) -> float | int:
+    try:
+        f = float(v)
+        return int(f) if f == int(f) else round(f, 1)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _parse_dt(value: Any) -> Optional[datetime]:
-    """Parse an ISO-8601 / epoch-millis timestamp into an aware UTC datetime."""
     if value in (None, ""):
         return None
-    # Epoch milliseconds (int or numeric string).
     if isinstance(value, (int, float)) or (isinstance(value, str) and value.isdigit()):
         try:
             return datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc)
@@ -95,45 +100,199 @@ def _parse_dt(value: Any) -> Optional[datetime]:
     return None
 
 
+def _iso(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
 # --- Public API calls --------------------------------------------------------
 
 def get_accounts(location_id: str) -> list[dict]:
     """Connected social accounts (pages) for a location."""
     data = _get(f"/social-media-posting/{location_id}/accounts")
     body = data.get("results", data) if isinstance(data, dict) else {}
-    accounts = body.get("accounts") if isinstance(body, dict) else None
-    return accounts or []
+    return (body.get("accounts") if isinstance(body, dict) else None) or []
 
 
-def list_posts(location_id: str, limit: int = 200) -> list[dict]:
-    """Recent posts for a location (across all its connected accounts)."""
-    body = {"type": "all", "accounts": [], "skip": 0, "limit": limit}
+def list_posts(location_id: str, limit: int = 100,
+               days_back: int = 120, days_forward: int = 45) -> list[dict]:
+    """Recent + upcoming posts. All DTO fields must be strings (GHL requirement)."""
+    now = datetime.now(timezone.utc)
+    body = {
+        "type": "all",
+        "accounts": "",
+        "skip": "0",
+        "limit": str(limit),
+        "fromDate": _iso(now - timedelta(days=days_back)),
+        "toDate": _iso(now + timedelta(days=days_forward)),
+        "includeUsers": "true",
+    }
     data = _post(f"/social-media-posting/{location_id}/posts/list", body)
     inner = data.get("results", data) if isinstance(data, dict) else {}
-    posts = inner.get("posts") if isinstance(inner, dict) else None
-    return posts or []
+    return (inner.get("posts") if isinstance(inner, dict) else None) or []
 
 
-def get_statistics(
-    location_id: str,
-    account_ids: list[str],
-    current: Optional[dict] = None,
-    previous: Optional[dict] = None,
-) -> dict:
+def get_statistics(location_id: str, profile_ids: list[str],
+                   platforms: Optional[list[str]] = None) -> dict:
     """
-    Advanced Analytics for a location's accounts (reach, impressions, followers,
-    likes, comments, shares). `current`/`previous` are {"startDate","endDate"}
-    ranges; GHL defaults to the last 7 days vs. the previous 7 if omitted.
-
-    NOTE: the exact request/response schema is confirmed on first live call via
-    the diagnostic view (see raw_debug); the metric mapping is finalised then.
+    Advanced Analytics for the given account profileIds (last 7 days, with a
+    change vs the previous 7). Returns the parsed `results` object.
     """
-    body: dict = {"accounts": account_ids}
-    if current:
-        body["currentRange"] = current
-    if previous:
-        body["prevRange"] = previous
-    return _post(f"/social-media-posting/{location_id}/statistics/", body)
+    body: dict = {"profileIds": profile_ids}
+    if platforms:
+        body["platforms"] = platforms
+    data = _post("/social-media-posting/statistics", body, params={"locationId": location_id})
+    return data.get("results", data) if isinstance(data, dict) else {}
+
+
+# --- Owner-friendly aggregation ---------------------------------------------
+
+_PLATFORM_LABELS = {
+    "facebook": "Facebook", "instagram": "Instagram", "google": "Google Business",
+    "linkedin": "LinkedIn", "twitter": "X (Twitter)", "tiktok": "TikTok",
+    "youtube": "YouTube", "pinterest": "Pinterest", "threads": "Threads",
+}
+# Platforms GHL's statistics API can report on.
+_STAT_PLATFORMS = {"facebook", "instagram", "linkedin", "google", "pinterest", "youtube", "tiktok"}
+
+
+def _platform_label(raw: str) -> str:
+    return _PLATFORM_LABELS.get((raw or "").lower(), (raw or "Other").title())
+
+
+def _metric(breakdowns: dict, totals: dict, name: str) -> dict:
+    m = breakdowns.get(name) if isinstance(breakdowns, dict) else None
+    m = m or {}
+    value = _num(_first(m, "total", default=totals.get(name, 0)))
+    change = _num(m.get("totalChange", 0))
+    return {"value": value, "change": change}
+
+
+def _stats_for(location_id: str, account: dict) -> Optional[dict]:
+    """Per-page performance metrics, or None if this platform has no analytics."""
+    profile_id = _first(account, "profileId", "profileID")
+    platform = (_first(account, "platform", default="") or "").lower()
+    if not profile_id or platform not in _STAT_PLATFORMS:
+        return None
+    res = get_statistics(location_id, [str(profile_id)], [platform])
+    totals = (res.get("totals") if isinstance(res, dict) else None) or {}
+    bd = (res.get("breakdowns") if isinstance(res, dict) else None) or {}
+    return {
+        "reach": _metric(bd, totals, "reach"),
+        "impressions": _metric(bd, totals, "impressions"),
+        "engagement": _metric(bd, totals, "engagement"),
+        "posts": _num(_first(totals, "posts", default=_first(bd.get("posts", {}), "total", default=0))),
+        "followers": _num(totals.get("followers", 0)),
+        "likes": _num(totals.get("likes", 0)),
+        "comments": _num(totals.get("comments", 0)),
+    }
+
+
+def _post_accounts(post: dict) -> list[str]:
+    val = _first(post, "accountIds", "accounts", "socialAccountIds", default=[])
+    if isinstance(val, str):
+        return [v.strip() for v in val.split(",") if v.strip()]
+    out = []
+    for item in val or []:
+        out.append(str(_first(item, "id", "_id", default="")) if isinstance(item, dict) else str(item))
+    return [i for i in out if i]
+
+
+def _post_time(post: dict) -> Optional[datetime]:
+    return _parse_dt(_first(post, "publishedAt", "scheduleDate", "scheduledAt", "createdAt"))
+
+
+def _is_scheduled(post: dict) -> bool:
+    return (_first(post, "status", "state", default="") or "").lower() in (
+        "scheduled", "pending", "queued", "in_progress")
+
+
+def _is_published(post: dict) -> bool:
+    return (_first(post, "status", "state", default="") or "").lower() in (
+        "published", "posted", "completed", "success", "live")
+
+
+def _freshness(days_since: Optional[int]) -> str:
+    if days_since is None:
+        return "none"
+    if days_since <= 7:
+        return "good"
+    if days_since <= 21:
+        return "aging"
+    return "stale"
+
+
+def social_overview(now: Optional[datetime] = None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    locations_out: list[dict] = []
+    totals = {"accounts": 0, "reach": 0, "impressions": 0, "engagement": 0,
+              "followers": 0, "posts": 0}
+    stats_ok = False
+
+    for loc in config.GHL_LOCATIONS:
+        loc_id = loc["id"]
+        accounts = get_accounts(loc_id)
+
+        # Posting context (last posted / scheduled). Non-fatal if it fails.
+        by_account: dict[str, list[dict]] = {}
+        try:
+            for p in list_posts(loc_id):
+                for aid in _post_accounts(p):
+                    by_account.setdefault(aid, []).append(p)
+        except Exception:  # noqa: BLE001
+            by_account = {}
+
+        rows = []
+        for a in accounts:
+            if _first(a, "deleted", default=False) is True:
+                continue
+            aid = str(_first(a, "id", "_id", default=""))
+            name = _first(a, "name", "accountName", default="Unnamed page")
+            platform = _platform_label(_first(a, "platform", default=""))
+            avatar = _first(a, "avatar", "picture", default="")
+
+            try:
+                perf = _stats_for(loc_id, a)
+            except Exception:  # noqa: BLE001
+                perf = None
+            if perf:
+                stats_ok = True
+                totals["reach"] += perf["reach"]["value"]
+                totals["impressions"] += perf["impressions"]["value"]
+                totals["engagement"] += perf["engagement"]["value"]
+                totals["followers"] += perf["followers"]
+                totals["posts"] += perf["posts"]
+
+            aposts = by_account.get(aid, [])
+            pub_times = [t for t in (_post_time(p) for p in aposts if _is_published(p)) if t]
+            sched = [t for t in (_post_time(p) for p in aposts if _is_scheduled(p)) if t and t >= now]
+            last_post = max(pub_times) if pub_times else None
+            days_since = (now - last_post).days if last_post else None
+
+            rows.append({
+                "name": name,
+                "platform": platform,
+                "platform_key": (_first(a, "platform", default="") or "").lower(),
+                "avatar": avatar,
+                "perf": perf,
+                "expired": _first(a, "isExpired", default=False) is True,
+                "last_post_at": last_post.strftime("%b %-d, %Y") if last_post else None,
+                "days_since": days_since,
+                "freshness": _freshness(days_since),
+                "scheduled": len(sched),
+                "next_scheduled_at": min(sched).strftime("%b %-d, %Y") if sched else None,
+            })
+            totals["accounts"] += 1
+
+        rows.sort(key=lambda r: (r["platform"], r["name"]))
+        locations_out.append({"label": loc["label"] or f"Location {loc_id[:6]}", "accounts": rows})
+
+    return {
+        "locations": locations_out,
+        "totals": totals,
+        "stats_ok": stats_ok,
+        "window": "Last 7 days vs previous 7",
+        "generated_at": now.strftime("%b %-d, %Y at %-I:%M %p UTC"),
+    }
 
 
 # --- Diagnostics -------------------------------------------------------------
@@ -142,7 +301,6 @@ _REDACT_RE = re.compile(r"token|secret|password|api[_-]?key|access|refresh", re.
 
 
 def _redact(obj: Any) -> Any:
-    """Strip anything that looks like a credential before we ever display it."""
     if isinstance(obj, dict):
         return {k: ("***" if _REDACT_RE.search(k) else _redact(v)) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -151,198 +309,34 @@ def _redact(obj: Any) -> Any:
 
 
 def raw_debug() -> list[dict]:
-    """
-    Return the raw (credential-redacted) API responses for each location so the
-    exact field shapes can be confirmed. Used by the /social?debug=1 view.
-    """
+    """Credential-redacted raw API responses, for /social?debug=1."""
     out: list[dict] = []
     for loc in config.GHL_LOCATIONS:
         lid = loc["id"]
         entry: dict = {"location": loc}
+        profile_ids, platforms = [], set()
         try:
-            entry["accounts_raw"] = _redact(_get(f"/social-media-posting/{lid}/accounts"))
+            accts = get_accounts(lid)
+            entry["accounts_raw"] = _redact({"count": len(accts), "accounts": accts})
+            for a in accts:
+                pid = _first(a, "profileId")
+                plat = (_first(a, "platform", default="") or "").lower()
+                if pid and plat in _STAT_PLATFORMS:
+                    profile_ids.append(str(pid))
+                    platforms.add(plat)
         except Exception as exc:  # noqa: BLE001
             entry["accounts_error"] = str(exc)
         try:
-            entry["posts_raw"] = _redact(_post(
-                f"/social-media-posting/{lid}/posts/list",
-                {"type": "all", "accounts": [], "skip": 0, "limit": 3},
-            ))
-        except Exception as exc:  # noqa: BLE001
-            entry["posts_error"] = str(exc)
-        acct_ids: list[str] = []
-        try:
-            for a in get_accounts(lid):
-                aid = str(_first(a, "id", "_id", "accountId", default=""))
-                if aid:
-                    acct_ids.append(aid)
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            entry["statistics_raw"] = _redact(get_statistics(lid, acct_ids))
+            entry["statistics_raw"] = _redact(
+                _post("/social-media-posting/statistics",
+                      {"profileIds": profile_ids, "platforms": list(platforms)},
+                      params={"locationId": lid})
+            )
         except Exception as exc:  # noqa: BLE001
             entry["statistics_error"] = str(exc)
+        try:
+            entry["posts_raw"] = _redact({"posts": list_posts(lid, limit=3)[:3]})
+        except Exception as exc:  # noqa: BLE001
+            entry["posts_error"] = str(exc)
         out.append(entry)
     return out
-
-
-# --- Owner-friendly aggregation ---------------------------------------------
-
-_PLATFORM_LABELS = {
-    "facebook": "Facebook",
-    "instagram": "Instagram",
-    "google": "Google Business",
-    "gmb": "Google Business",
-    "googlemybusiness": "Google Business",
-    "linkedin": "LinkedIn",
-    "twitter": "X (Twitter)",
-    "x": "X (Twitter)",
-    "tiktok": "TikTok",
-    "youtube": "YouTube",
-    "pinterest": "Pinterest",
-    "threads": "Threads",
-}
-
-
-def _platform_label(raw: str) -> str:
-    key = (raw or "").lower().replace(" ", "").replace("-", "").replace("_", "")
-    return _PLATFORM_LABELS.get(key, (raw or "Other").title())
-
-
-def _post_accounts(post: dict) -> list[str]:
-    """The account ids a post targeted, however GHL labelled the field."""
-    val = _first(post, "accountIds", "accounts", "socialAccountIds", "targetAccounts", default=[])
-    ids = []
-    for item in val or []:
-        if isinstance(item, dict):
-            ids.append(str(_first(item, "id", "_id", "accountId", default="")))
-        else:
-            ids.append(str(item))
-    return [i for i in ids if i]
-
-
-def _classify(post: dict) -> str:
-    """Bucket a post as published / scheduled / failed / other."""
-    status = (_first(post, "status", "state", default="") or "").lower()
-    if status in ("published", "posted", "completed", "success", "live"):
-        return "published"
-    if status in ("failed", "error", "errored"):
-        return "failed"
-    if status in ("scheduled", "pending", "queued", "in_progress"):
-        return "scheduled"
-    return status or "other"
-
-
-def _post_time(post: dict) -> Optional[datetime]:
-    return _parse_dt(_first(
-        post, "publishedAt", "publishedDate", "scheduleDate", "scheduledAt",
-        "createdAt", "updatedAt",
-    ))
-
-
-def social_overview(now: Optional[datetime] = None) -> dict:
-    """
-    Pull every configured location and summarise posting activity into a shape
-    the Social tab can render directly.
-    """
-    now = now or datetime.now(timezone.utc)
-    cutoff_30 = now - timedelta(days=30)
-    cutoff_7 = now - timedelta(days=7)
-    week_starts = [now - timedelta(days=7 * (i + 1)) for i in range(8)][::-1]
-
-    locations_out: list[dict] = []
-    totals = {"accounts": 0, "posts_30d": 0, "scheduled": 0, "failed_30d": 0}
-    weekly_all = [0] * 8
-
-    for loc in config.GHL_LOCATIONS:
-        loc_id = loc["id"]
-        accounts = get_accounts(loc_id)
-        posts = list_posts(loc_id)
-
-        # Index posts by the account they targeted.
-        by_account: dict[str, list[dict]] = {}
-        for p in posts:
-            for aid in _post_accounts(p):
-                by_account.setdefault(aid, []).append(p)
-
-        acct_rows = []
-        for a in accounts:
-            aid = str(_first(a, "id", "_id", "accountId", default=""))
-            name = _first(a, "name", "accountName", "pageName", "originName", default="Unnamed page")
-            platform = _platform_label(_first(a, "platform", "type", "provider", default=""))
-            avatar = _first(a, "avatar", "picture", "profilePicture", "image", default="")
-            aposts = by_account.get(aid, [])
-
-            published = [(p, _post_time(p)) for p in aposts if _classify(p) == "published"]
-            posts_30d = sum(1 for _, t in published if t and t >= cutoff_30)
-            posts_7d = sum(1 for _, t in published if t and t >= cutoff_7)
-            failed_30d = sum(
-                1 for p in aposts
-                if _classify(p) == "failed" and (_post_time(p) or now) >= cutoff_30
-            )
-            scheduled = [
-                (p, _post_time(p)) for p in aposts
-                if _classify(p) == "scheduled" and (_post_time(p) or now) >= now
-            ]
-            published_times = [t for _, t in published if t]
-            last_post_at = max(published_times) if published_times else None
-            next_times = [t for _, t in scheduled if t]
-            next_scheduled_at = min(next_times) if next_times else None
-
-            # 8-week activity histogram for this account.
-            weekly = [0] * 8
-            for _, t in published:
-                if not t:
-                    continue
-                for i, ws in enumerate(week_starts):
-                    we = ws + timedelta(days=7)
-                    if ws <= t < we:
-                        weekly[i] += 1
-                        weekly_all[i] += 1
-                        break
-
-            days_since = (now - last_post_at).days if last_post_at else None
-            acct_rows.append({
-                "name": name,
-                "platform": platform,
-                "avatar": avatar,
-                "posts_30d": posts_30d,
-                "posts_7d": posts_7d,
-                "failed_30d": failed_30d,
-                "scheduled": len(scheduled),
-                "last_post_at": last_post_at.strftime("%b %-d, %Y") if last_post_at else None,
-                "days_since": days_since,
-                "freshness": _freshness(days_since),
-                "next_scheduled_at": next_scheduled_at.strftime("%b %-d, %Y") if next_scheduled_at else None,
-                "weekly": weekly,
-            })
-            totals["accounts"] += 1
-            totals["posts_30d"] += posts_30d
-            totals["scheduled"] += len(scheduled)
-            totals["failed_30d"] += failed_30d
-
-        # Sort a location's pages by platform then name for a stable layout.
-        acct_rows.sort(key=lambda r: (r["platform"], r["name"]))
-        locations_out.append({
-            "label": loc["label"] or f"Location {loc_id[:6]}",
-            "accounts": acct_rows,
-        })
-
-    return {
-        "locations": locations_out,
-        "totals": totals,
-        "weekly": weekly_all,
-        "weekly_max": max(weekly_all) if any(weekly_all) else 0,
-        "generated_at": now.strftime("%b %-d, %Y at %-I:%M %p UTC"),
-    }
-
-
-def _freshness(days_since: Optional[int]) -> str:
-    """A simple health label an owner can read at a glance."""
-    if days_since is None:
-        return "none"        # never posted (in the window we pulled)
-    if days_since <= 7:
-        return "good"        # posted within the last week
-    if days_since <= 21:
-        return "aging"       # getting quiet
-    return "stale"           # gone quiet
