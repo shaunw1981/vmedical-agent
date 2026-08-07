@@ -1,0 +1,43 @@
+{# Left sidebar. `nav_current` is set in base.html from each page's {% block nav %}. #}
+<aside class="sidebar">
+  <a class="brand" href="/" aria-label="Valley Medical">
+    <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+      <rect width="64" height="64" rx="14" fill="#7c8a73"/>
+      <rect x="17" y="15" width="30" height="2" fill="#fff"/>
+      <text x="32" y="42" font-family="Georgia,serif" font-size="27" font-weight="700"
+            fill="#fff" text-anchor="middle" letter-spacing="1">VM</text>
+      <rect x="17" y="49" width="30" height="2" fill="#fff"/>
+    </svg>
+    <span class="brand-name">Valley Medical</span>
+  </a>
+
+  <div class="profile">
+    <div class="avatar">{{ (user.name or user.email)[0]|upper }}</div>
+    <div>
+      <div class="profile-name">{{ user.name or user.email }}</div>
+      <div class="profile-role">{{ ROLE_LABELS[user.role] }}</div>
+    </div>
+  </div>
+
+  <nav class="nav-group">
+    <div class="nav-heading">Summary</div>
+    <a class="nav-link {{ 'active' if nav_current == 'home' }}" href="/">Overview</a>
+    {% if can(user.role, 'view_messages') %}
+    <a class="nav-link {{ 'active' if nav_current == 'messages' }}" href="/messages">
+      Messages{% if new_count %}<span class="badge">{{ new_count }}</span>{% endif %}</a>
+    {% endif %}
+    {% if can(user.role, 'view_social') %}
+    <a class="nav-link {{ 'active' if nav_current == 'social' }}" href="/social">Social</a>
+    {% endif %}
+    {% if can(user.role, 'manage_users') %}
+    <a class="nav-link {{ 'active' if nav_current == 'team' }}" href="/admin/users">Team</a>
+    {% endif %}
+  </nav>
+
+  <div class="nav-group">
+    <div class="nav-heading">Feedback</div>
+    <span class="nav-link disabled">Reviews · soon</span>
+  </div>
+
+  <a class="nav-link logout" href="/logout">Log out</a>
+</aside>

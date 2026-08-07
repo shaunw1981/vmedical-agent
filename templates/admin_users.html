@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Team · Spa Dashboard{% endblock %}
-{% block nav_users %}active{% endblock %}
+{% block nav %}team{% endblock %}
 {% block content %}
   <h1>Team &amp; access</h1>
   <div class="card">
@@ -8,13 +8,16 @@
       they sign in with Google. Set each person's access level below.
       {% if user.role == 'spa_manager' %}
       As a Spa Manager you can manage Team Members.{% endif %}</p>
-    <table>
-      <tr><th>Name</th><th>Email</th><th>Access level</th><th>Status</th></tr>
+    <table class="stack">
+      <thead>
+        <tr><th>Name</th><th>Email</th><th>Access level</th><th>Status</th></tr>
+      </thead>
+      <tbody>
       {% for u in users %}
       <tr>
-        <td><strong>{{ u.name or '—' }}</strong></td>
-        <td class="muted">{{ u.email }}</td>
-        <td>
+        <td data-label="Name"><strong>{{ u.name or '—' }}</strong></td>
+        <td data-label="Email" class="muted">{{ u.email }}</td>
+        <td data-label="Access level">
           {% set editable = (user.role == 'super_admin')
              or (user.role == 'spa_manager' and u.role == 'team_member') %}
           {% if editable and u.email != user.email %}
@@ -36,7 +39,7 @@
             {% if u.email == user.email %}<span class="muted"> (you)</span>{% endif %}
           {% endif %}
         </td>
-        <td>
+        <td data-label="Status">
           {% if u.active %}
             <span class="tag responded">Active</span>
           {% else %}
@@ -57,6 +60,7 @@
         </td>
       </tr>
       {% endfor %}
+      </tbody>
     </table>
   </div>
 {% endblock %}

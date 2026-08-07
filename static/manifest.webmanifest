@@ -1,0 +1,17 @@
+{
+  "name": "Valley Medical Dashboard",
+  "short_name": "VM Dash",
+  "description": "Valley Medical team dashboard — phone messages, social performance, and team.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f4f6f5",
+  "theme_color": "#7c8a73",
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/static/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/static/icons/apple-touch-icon-180.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

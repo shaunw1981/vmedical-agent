@@ -1,34 +1,71 @@
 {% extends "base.html" %}
-{% block title %}Home · Spa Dashboard{% endblock %}
-{% block nav_home %}active{% endblock %}
+{% import "_macros.html" as ui %}
+{% block title %}Overview · Spa Dashboard{% endblock %}
+{% block nav %}home{% endblock %}
 {% block content %}
-  <h1>Welcome, {{ (user.name or user.email).split(' ')[0] }}</h1>
-  <div class="row">
-    <div class="card">
-      <div class="muted">New phone messages</div>
-      <div class="stat">{{ new_count }}</div>
-      {% if can(user.role, 'view_messages') %}
-        <a class="btn secondary" href="/messages">Open inbox</a>
-      {% endif %}
+  <div class="page-head">
+    <h1 style="margin:0">Welcome, {{ (user.name or user.email).split(' ')[0] }}</h1>
+    <span class="muted" style="font-size:.85rem">{{ today }}</span>
+  </div>
+
+  <div class="kpi-row">
+    {{ ui.kpi_tile('New phone messages', new_count, msg_trend, 'vs. previous 7 days') }}
+    {{ ui.kpi_tile('Responded', responded_count) }}
+    {{ ui.kpi_tile('Response rate', rate_str, none, 'of all calls handled') }}
+    {{ ui.kpi_tile('Calls this week', week_total, none, 'last 7 days') }}
+  </div>
+
+  <div class="chart-row">
+    <div class="chart-card">
+      <h2>Call activity</h2>
+      <div class="chart-sub">Phone messages per day · last 14 days</div>
+      {{ ui.bar_chart(daily_bars) }}
     </div>
-    <div class="card">
-      <div class="muted">Responded</div>
-      <div class="stat">{{ responded_count }}</div>
-    </div>
-    <div class="card">
-      <div class="muted">Your access level</div>
-      <div class="stat" style="font-size:1.3rem;margin-top:.4rem">
-        {{ ROLE_LABELS[user.role] }}
+    <div class="chart-card">
+      <h2>Response status</h2>
+      <div class="chart-sub">All-time</div>
+      <div class="donut-wrap">
+        {{ ui.donut(status_donut, rate_str, 'responded') }}
+        <div class="legend">
+          {% for s in status_donut.segments %}
+          <div class="li"><span class="sw" style="background:{{ s.color }}"></span>
+            {{ s.label }} <b>{{ s.value }}</b></div>
+          {% endfor %}
+        </div>
       </div>
     </div>
   </div>
 
   <div class="card">
+    <div class="page-head" style="margin-bottom:.4rem">
+      <h2 style="margin:0">Recent activity</h2>
+      {% if can(user.role, 'view_messages') %}<a class="muted" style="font-size:.85rem" href="/messages">See all →</a>{% endif %}
+    </div>
+    {% if recent %}
+    <div class="recent">
+      {% for m in recent %}
+      <a class="recent-item" href="/messages">
+        <div class="avatar" style="width:36px;height:36px;font-size:.9rem">{{ (m.client_name or '?')[0]|upper }}</div>
+        <div>
+          <div class="who">{{ m.client_name or 'Unknown caller' }}</div>
+          <div class="meta">{{ m.client_phone }} · {{ m.created_at.replace('T', ' ') }}</div>
+        </div>
+        <div class="spacer"></div>
+        {% if m.status == 'responded' %}<span class="tag responded">Responded</span>
+        {% else %}<span class="tag new">New</span>{% endif %}
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted" style="margin:.2rem 0">No phone messages yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
     <h2>What's here now</h2>
-    <p class="muted">This is Build #1. The after-hours phone line is handled by
-      the AI receptionist; every call lands in <strong>Messages</strong> for the
-      team to follow up and is filed into the client's record in the Obsidian
-      brain. More sections (client records, in-person consult notes, and other
-      agents) will appear here as we build them.</p>
+    <p class="muted" style="margin:.2rem 0 0">The after-hours phone line is handled by the AI
+      receptionist; every call lands in <strong>Messages</strong> for the team to follow up and is
+      filed into the client's record in the Obsidian brain. <strong>Social</strong> tracks your
+      Facebook, Instagram, and Google performance. More sections will appear here as we build them.</p>
   </div>
 {% endblock %}

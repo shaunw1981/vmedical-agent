@@ -13,7 +13,7 @@ the structured state the dashboard needs (statuses, roles, who responded, etc.).
 
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -203,3 +203,45 @@ def mark_message_responded(message_id: int, responded_by: str) -> None:
             "responded_at = ? WHERE id = ?",
             (responded_by, datetime.now().isoformat(timespec="seconds"), message_id),
         )
+
+
+# --- Dashboard metrics (for the Overview charts) -----------------------------
+def status_breakdown() -> dict:
+    """How many messages are still new vs. responded (all-time)."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) c FROM messages GROUP BY status"
+        ).fetchall()
+    counts = {r["status"]: r["c"] for r in rows}
+    new = counts.get("new", 0)
+    responded = counts.get("responded", 0)
+    return {"new": new, "responded": responded, "total": new + responded}
+
+
+def messages_by_day(days: int = 14) -> list[dict]:
+    """
+    A continuous per-day series for the last `days` days (gap-filled with zeros),
+    oldest first. Each entry: day (ISO), label (day-of-month), weekday, total,
+    responded, new. Drives the Overview activity chart.
+    """
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT date(created_at) d, COUNT(*) total, "
+            "SUM(CASE WHEN status = 'responded' THEN 1 ELSE 0 END) responded "
+            "FROM messages GROUP BY date(created_at)"
+        ).fetchall()
+    by_day = {r["d"]: (r["total"], r["responded"] or 0) for r in rows}
+    today = datetime.now().date()
+    out: list[dict] = []
+    for i in range(days - 1, -1, -1):
+        d = today - timedelta(days=i)
+        total, responded = by_day.get(d.isoformat(), (0, 0))
+        out.append({
+            "day": d.isoformat(),
+            "label": d.strftime("%-d"),
+            "weekday": d.strftime("%a"),
+            "total": total,
+            "responded": responded,
+            "new": total - responded,
+        })
+    return out

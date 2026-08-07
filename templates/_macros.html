@@ -1,0 +1,51 @@
+{# Reusable UI macros: KPI tiles, trend chips, and dependency-free inline-SVG
+   charts. Import at the top of a page with:  {% import "_macros.html" as ui %}
+   Chart macros take the dicts returned by charts.py (bar_series/line_series/
+   donut_segments). `fmt` is a global number formatter. #}
+
+{% macro trend(m) -%}
+  {%- if m and m.change > 0 -%}<span class="trend up">▲ {{ fmt(m.change) }}</span>
+  {%- elif m and m.change < 0 -%}<span class="trend down">▼ {{ fmt(m.change|abs) }}</span>
+  {%- else -%}<span class="trend flat">—</span>{%- endif -%}
+{%- endmacro %}
+
+{% macro kpi_tile(label, value, trend_data=None, sub=None) -%}
+<div class="kpi-tile">
+  <div class="k"><span>{{ label }}</span>{% if trend_data is not none %}{{ trend(trend_data) }}{% endif %}</div>
+  <div class="n">{{ fmt(value) }}</div>
+  {% if sub %}<div class="sub">{{ sub }}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro bar_chart(d) -%}
+<div class="chart"><svg viewBox="0 0 {{ d.width }} {{ d.height }}" role="img" aria-label="Bar chart">
+  {% for b in d.bars %}
+  <rect class="bar" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="3"><title>{{ b.label }}: {{ b.value }}</title></rect>
+  <text class="bar-label" x="{{ b.cx }}" y="{{ d.height - 5 }}" text-anchor="middle">{{ b.label }}</text>
+  {% endfor %}
+</svg></div>
+{%- endmacro %}
+
+{% macro line_chart(d) -%}
+<div class="chart"><svg viewBox="0 0 {{ d.width }} {{ d.height }}" role="img" aria-label="Line chart">
+  {% if d.area %}<path class="area" d="{{ d.area }}"></path>{% endif %}
+  <polyline class="line" points="{{ d.points }}"></polyline>
+  {% for dot in d.dots %}<circle class="dot" cx="{{ dot.x }}" cy="{{ dot.y }}" r="2.5"><title>{{ dot.value }}</title></circle>{% endfor %}
+</svg></div>
+{%- endmacro %}
+
+{% macro donut(d, center_value='', center_label='') -%}
+<div class="donut" style="width:{{ d.size }}px;height:{{ d.size }}px">
+  <svg viewBox="0 0 {{ d.size }} {{ d.size }}" width="{{ d.size }}" height="{{ d.size }}" role="img" aria-label="Donut chart">
+    <circle class="track" cx="{{ d.cx }}" cy="{{ d.cy }}" r="{{ d.r }}" stroke-width="{{ d.stroke }}"></circle>
+    <g transform="rotate(-90 {{ d.cx }} {{ d.cy }})">
+      {% for s in d.segments %}
+      <circle class="seg" cx="{{ d.cx }}" cy="{{ d.cy }}" r="{{ d.r }}" stroke="{{ s.color }}"
+              stroke-width="{{ d.stroke }}" stroke-dasharray="{{ s.dasharray }}"
+              stroke-dashoffset="{{ s.dashoffset }}"><title>{{ s.label }}: {{ s.value }} ({{ s.pct }}%)</title></circle>
+      {% endfor %}
+    </g>
+  </svg>
+  <div class="donut-center"><div class="dn">{{ center_value }}</div><div class="dk">{{ center_label }}</div></div>
+</div>
+{%- endmacro %}

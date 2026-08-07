@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Social · Spa Dashboard{% endblock %}
-{% block nav_social %}active{% endblock %}
+{% block nav %}social{% endblock %}
 
 {% macro trend(m) %}
   {% if m.change > 0 %}<span class="trend up">▲ {{ fmt(m.change) }}</span>

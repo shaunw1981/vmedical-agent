@@ -12,25 +12,37 @@ See SETUP-MACMINI.md for how to run it and connect Google + GoHighLevel.
 
 import re
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+)
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 import auth
+import charts
 import config
 import db
 import email_monitor
 import ghl
 import obsidian
 
-app = FastAPI(title="vmedical-agent dashboard", version="3.0.0")
-app.add_middleware(SessionMiddleware, secret_key=config.SESSION_SECRET)
+BASE_DIR = Path(__file__).parent
+STATIC_DIR = BASE_DIR / "static"
 
-templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+app = FastAPI(title="vmedical-agent dashboard", version="4.0.0")
+app.add_middleware(SessionMiddleware, secret_key=config.SESSION_SECRET)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 def _fmt_num(n) -> str:
@@ -44,8 +56,34 @@ def _fmt_num(n) -> str:
 
 # Make role/permission helpers available inside every template.
 templates.env.globals.update(
-    can=config.can, ROLE_LABELS=config.ROLE_LABELS, ROLES=config.ROLES, fmt=_fmt_num
+    can=config.can, ROLE_LABELS=config.ROLE_LABELS, ROLES=config.ROLES, fmt=_fmt_num,
+    ASSET_VER=app.version,  # cache-buster for /static/app.css & app.js
 )
+
+
+# --- Static / PWA files ------------------------------------------------------
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def manifest():
+    return FileResponse(STATIC_DIR / "manifest.webmanifest",
+                        media_type="application/manifest+json")
+
+
+@app.get("/sw.js", include_in_schema=False)
+def service_worker():
+    # Served from root so its scope can control the whole app.
+    return FileResponse(STATIC_DIR / "js" / "sw.js", media_type="application/javascript",
+                        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"})
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return FileResponse(STATIC_DIR / "icons" / "favicon.png", media_type="image/png")
+
+
+@app.get("/offline", response_class=HTMLResponse, include_in_schema=False)
+def offline(request: Request):
+    # Neutral, auth-free page the service worker falls back to when offline.
+    return templates.TemplateResponse("offline.html", {"request": request})
 
 
 @app.on_event("startup")
@@ -146,9 +184,32 @@ def dashboard(request: Request):
     user, resp = _guard(request)
     if resp:
         return resp
+
+    daily = db.messages_by_day(14)
+    week_total = sum(d["total"] for d in daily[-7:])
+    prev_week = sum(d["total"] for d in daily[-14:-7])
+    status = db.status_breakdown()
+    rate = round(status["responded"] / status["total"] * 100) if status["total"] else 0
+
+    daily_bars = charts.bar_series([d["total"] for d in daily], [d["label"] for d in daily])
+    status_donut = charts.donut_segments([
+        ("Responded", status["responded"], "#7c8a73"),
+        ("New", status["new"], "#d8ded2"),
+    ])
+
     return templates.TemplateResponse(
         "dashboard.html",
-        _ctx(request, user, responded_count=len(db.list_messages("responded"))),
+        _ctx(
+            request, user,
+            responded_count=status["responded"],
+            week_total=week_total,
+            rate_str=f"{rate}%",
+            msg_trend={"change": week_total - prev_week},
+            daily_bars=daily_bars,
+            status_donut=status_donut,
+            recent=db.list_messages()[:5],
+            today=datetime.now().strftime("%A, %B %-d, %Y"),
+        ),
     )
 
 
@@ -245,7 +306,8 @@ def messages_inbox(request: Request, status: str = "new"):
         m["is_conversation"] = any(t["role"] in ("agent", "caller") for t in turns)
     return templates.TemplateResponse(
         "messages.html",
-        _ctx(request, user, messages=messages, active_filter=status),
+        _ctx(request, user, messages=messages, active_filter=status,
+             status_counts=db.status_breakdown()),
     )
 
 

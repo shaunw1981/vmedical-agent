@@ -1,6 +1,7 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}Messages · Spa Dashboard{% endblock %}
-{% block nav_msg %}active{% endblock %}
+{% block nav %}messages{% endblock %}
 {% block content %}
   <div class="page-head">
     <h1 style="margin:0">Phone messages</h1>
@@ -13,6 +14,14 @@
          href="/messages?status=all">All</a>
     </div>
   </div>
+
+  {% if status_counts %}
+  <div class="kpi-row">
+    {{ ui.kpi_tile('New', status_counts.new) }}
+    {{ ui.kpi_tile('Responded', status_counts.responded) }}
+    {{ ui.kpi_tile('Total calls', status_counts.total) }}
+  </div>
+  {% endif %}
 
   {% if not messages %}
     <div class="card"><p class="muted" style="margin:.2rem 0">No messages here yet.</p></div>
