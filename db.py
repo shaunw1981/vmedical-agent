@@ -62,6 +62,29 @@ def init_db() -> None:
                 obsidian_file TEXT,
                 ghl_call_id   TEXT UNIQUE
             );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key         TEXT PRIMARY KEY,
+                value       TEXT,
+                updated_at  TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS appointments (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at     TEXT NOT NULL,
+                created_by     TEXT,
+                contact_name   TEXT NOT NULL,
+                email          TEXT,
+                phone          TEXT,
+                appt_at        TEXT NOT NULL,   -- local ISO 'YYYY-MM-DDTHH:MM'
+                type_key       TEXT NOT NULL,
+                type_label     TEXT NOT NULL,
+                workflow_id    TEXT,
+                workflow_name  TEXT,
+                ghl_contact_id TEXT,
+                status         TEXT NOT NULL DEFAULT 'scheduled',  -- scheduled|cancelled
+                note           TEXT
+            );
             """
         )
         # Lightweight migrations: add columns that newer versions expect, so an
@@ -203,6 +226,100 @@ def mark_message_responded(message_id: int, responded_by: str) -> None:
             "responded_at = ? WHERE id = ?",
             (responded_by, datetime.now().isoformat(timespec="seconds"), message_id),
         )
+
+
+# --- Settings (small key/value store, e.g. reminder workflow mapping) --------
+def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
+    with _connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row and row["value"] is not None else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+            "updated_at = excluded.updated_at",
+            (key, value, datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def delete_setting(key: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+
+
+# --- Appointment reminders ---------------------------------------------------
+def add_appointment(
+    contact_name: str,
+    appt_at: str,
+    type_key: str,
+    type_label: str,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    workflow_id: Optional[str] = None,
+    workflow_name: Optional[str] = None,
+    ghl_contact_id: Optional[str] = None,
+    created_by: Optional[str] = None,
+    note: Optional[str] = None,
+) -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO appointments "
+            "(created_at, created_by, contact_name, email, phone, appt_at, "
+            " type_key, type_label, workflow_id, workflow_name, ghl_contact_id, "
+            " status, note) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)",
+            (
+                datetime.now().isoformat(timespec="seconds"),
+                created_by, contact_name, email, phone, appt_at,
+                type_key, type_label, workflow_id, workflow_name, ghl_contact_id, note,
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def list_appointments(status: Optional[str] = None, limit: int = 200) -> list[dict]:
+    """Appointments, soonest upcoming first then past. Optional status filter."""
+    query = "SELECT * FROM appointments "
+    params: list = []
+    if status:
+        query += "WHERE status = ? "
+        params.append(status)
+    # Upcoming (appt_at >= now) ascending, then past descending.
+    now = datetime.now().isoformat(timespec="minutes")
+    query += (
+        "ORDER BY CASE WHEN appt_at >= ? THEN 0 ELSE 1 END, "
+        "CASE WHEN appt_at >= ? THEN appt_at END ASC, appt_at DESC LIMIT ?"
+    )
+    params.extend([now, now, limit])
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def list_upcoming_appointments(limit: int = 5) -> list[dict]:
+    now = datetime.now().isoformat(timespec="minutes")
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM appointments WHERE status = 'scheduled' AND appt_at >= ? "
+            "ORDER BY appt_at ASC LIMIT ?",
+            (now, limit),
+        ).fetchall()]
+
+
+def count_upcoming_appointments() -> int:
+    now = datetime.now().isoformat(timespec="minutes")
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM appointments WHERE status = 'scheduled' AND appt_at >= ?",
+            (now,),
+        ).fetchone()[0]
+
+
+def cancel_appointment(appt_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE appointments SET status = 'cancelled' WHERE id = ?", (appt_id,))
 
 
 # --- Dashboard metrics (for the Overview charts) -----------------------------

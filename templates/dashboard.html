@@ -61,6 +61,33 @@
     {% endif %}
   </div>
 
+  {% if can(user.role, 'view_reminders') %}
+  <div class="card">
+    <div class="page-head" style="margin-bottom:.4rem">
+      <h2 style="margin:0">Appointment reminders scheduled
+        {% if upcoming_appts_count %}<span class="pill">{{ upcoming_appts_count }}</span>{% endif %}</h2>
+      <a class="muted" style="font-size:.85rem" href="/reminders">Schedule / see all →</a>
+    </div>
+    {% if upcoming_appts %}
+    <div class="recent">
+      {% for a in upcoming_appts %}
+      <a class="recent-item" href="/reminders">
+        <div class="avatar" style="width:36px;height:36px;font-size:.9rem">{{ (a.contact_name or '?')[0]|upper }}</div>
+        <div>
+          <div class="who">{{ a.contact_name }}</div>
+          <div class="meta">{{ a.type_label }} · {{ fmt_appt(a.appt_at) }}</div>
+        </div>
+        <div class="spacer"></div>
+        <span class="tag responded">Scheduled</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted" style="margin:.2rem 0">No upcoming reminders. <a href="/reminders">Schedule one →</a></p>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <div class="card">
     <h2>What's here now</h2>
     <p class="muted" style="margin:.2rem 0 0">The after-hours phone line is handled by the AI

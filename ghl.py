@@ -308,6 +308,76 @@ def _redact(obj: Any) -> Any:
     return obj
 
 
+# --- Contacts & workflows (appointment reminders) ----------------------------
+
+def upsert_contact(location_id: str, name: str, email: Optional[str] = None,
+                   phone: Optional[str] = None, tags: Optional[list[str]] = None) -> dict:
+    """
+    Create or update a contact (matched by email/phone) and return its record.
+    Uses POST /contacts/upsert so re-scheduling the same person doesn't duplicate.
+    """
+    name = (name or "").strip()
+    first, _, last = name.partition(" ")
+    body: dict = {"locationId": location_id, "name": name or (email or phone or "Contact")}
+    if first:
+        body["firstName"] = first
+    if last:
+        body["lastName"] = last
+    if email:
+        body["email"] = email.strip()
+    if phone:
+        body["phone"] = phone.strip()
+    if tags:
+        body["tags"] = tags
+    data = _post("/contacts/upsert", body)
+    contact = data.get("contact") if isinstance(data, dict) else None
+    contact = contact if isinstance(contact, dict) else (data if isinstance(data, dict) else {})
+    cid = _first(contact, "id", "_id", "contactId")
+    if not cid:
+        raise RuntimeError(f"GoHighLevel did not return a contact id. Response: {str(data)[:200]}")
+    return {"id": str(cid), "raw": contact}
+
+
+def search_contacts(location_id: str, query: str, limit: int = 10) -> list[dict]:
+    """Look up contacts by name/email/phone — used for the lookup + Chrome extension."""
+    data = _get("/contacts/", params={"locationId": location_id,
+                                       "query": (query or "").strip(), "limit": limit})
+    rows = (data.get("contacts") if isinstance(data, dict) else None) or []
+    out = []
+    for c in rows:
+        out.append({
+            "id": str(_first(c, "id", "_id", default="")),
+            "name": _first(c, "contactName", "name",
+                           default=f"{_first(c, 'firstName', default='') or ''} "
+                                   f"{_first(c, 'lastName', default='') or ''}".strip()),
+            "email": _first(c, "email", default=""),
+            "phone": _first(c, "phone", default=""),
+        })
+    return out
+
+
+def list_workflows(location_id: str) -> list[dict]:
+    """All workflows for a location (id + name), for the reminder mapping page."""
+    data = _get("/workflows/", params={"locationId": location_id})
+    rows = (data.get("workflows") if isinstance(data, dict) else None) or []
+    return [{"id": str(_first(w, "id", "_id", default="")),
+             "name": _first(w, "name", default="(unnamed workflow)"),
+             "status": _first(w, "status", default="")} for w in rows
+            if _first(w, "id", "_id")]
+
+
+def add_contact_to_workflow(contact_id: str, workflow_id: str,
+                            event_start_time: Optional[str] = None) -> dict:
+    """
+    Drop a contact into a workflow. event_start_time (ISO8601 with offset) sets
+    the workflow's appointment/event reference so reminder timing works.
+    """
+    body: dict = {}
+    if event_start_time:
+        body["eventStartTime"] = event_start_time
+    return _post(f"/contacts/{contact_id}/workflow/{workflow_id}", body)
+
+
 def raw_debug() -> list[dict]:
     """Credential-redacted raw API responses, for /social?debug=1."""
     out: list[dict] = []

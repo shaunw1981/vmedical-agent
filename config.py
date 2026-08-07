@@ -74,6 +74,47 @@ def ghl_social_enabled() -> bool:
     """True once a token and at least one location id are configured."""
     return bool(GHL_API_TOKEN and GHL_LOCATIONS)
 
+
+# --- Appointment reminders ---------------------------------------------------
+# The clinic's timezone, used when handing an appointment time to GoHighLevel
+# (so "2pm" means 2pm at the clinic, not UTC). Any IANA name works, e.g.
+# America/Halifax, America/Toronto, America/Vancouver.
+CLINIC_TIMEZONE = os.environ.get("TIMEZONE", "America/Halifax").strip() or "America/Halifax"
+
+# The GHL location (sub-account) that contacts + workflows live in for reminders.
+# Defaults to the first GHL_LOCATIONS entry; override with GHL_REMINDER_LOCATION.
+_REMINDER_LOCATION = os.environ.get("GHL_REMINDER_LOCATION", "").strip()
+
+# The appointment types the team can pick from. Each drops the contact into the
+# matching GoHighLevel workflow (mapped in-app on the Reminder settings page).
+# (stable_key, display label) — keys are stored, so don't rename them casually.
+APPOINTMENT_TYPES: list[tuple[str, str]] = [
+    ("spa_aesthetics_laser", "Spa/Aesthetics/Laser"),
+    ("sclerotherapy", "Sclerotherapy"),
+    ("evlt", "EVLT"),
+    ("consult_dr_davidson", "Consultation Dr Davidson"),
+    ("ultrasound", "Ultrasound"),
+    ("compression_brace_fitting", "Compression/Brace Fitting"),
+]
+APPOINTMENT_TYPE_LABELS = dict(APPOINTMENT_TYPES)
+
+# Optional API key so a future Chrome extension can call the JSON endpoints
+# (contact lookup + schedule reminder) without a browser session. Leave blank
+# to keep those endpoints session-only.
+DASHBOARD_API_KEY = os.environ.get("DASHBOARD_API_KEY", "").strip()
+
+
+def reminder_location_id() -> str:
+    """The GHL sub-account id used for reminder contacts/workflows."""
+    if _REMINDER_LOCATION:
+        return _REMINDER_LOCATION
+    return GHL_LOCATIONS[0]["id"] if GHL_LOCATIONS else ""
+
+
+def ghl_contacts_enabled() -> bool:
+    """True once a token and a reminder location are configured."""
+    return bool(GHL_API_TOKEN and reminder_location_id())
+
 # --- Email monitor (reads the "AI Call Recap" emails) ------------------------
 # The app checks this mailbox on a schedule and turns each new recap email into
 # a dashboard message + Obsidian note. Leave IMAP_USER/IMAP_PASSWORD blank to
@@ -107,8 +148,10 @@ DEFAULT_ROLE = "team_member"
 #   view_messages     - see the after-hours phone message inbox
 #   respond_messages  - mark a message as responded
 #   manage_users      - invite/remove team members and change their roles
-#   manage_settings   - change system settings (future)
+#   manage_settings   - change system settings (e.g. reminder workflow mapping)
 #   view_social       - see the social-media posting-activity dashboard
+#   view_reminders    - see the scheduled appointment reminders
+#   schedule_reminders- look up a contact and schedule an appointment reminder
 ROLE_CAPABILITIES = {
     "super_admin": {
         "view_messages",
@@ -116,16 +159,22 @@ ROLE_CAPABILITIES = {
         "manage_users",
         "manage_settings",
         "view_social",
+        "view_reminders",
+        "schedule_reminders",
     },
     "spa_manager": {
         "view_messages",
         "respond_messages",
         "manage_users",  # managers can manage team members (but not super admins)
         "view_social",
+        "view_reminders",
+        "schedule_reminders",
     },
     "team_member": {
         "view_messages",
         "respond_messages",
+        "view_reminders",
+        "schedule_reminders",
     },
 }
 

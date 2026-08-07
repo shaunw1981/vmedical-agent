@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Reminders · Spa Dashboard{% endblock %}
+{% block nav %}reminders{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1 style="margin:0">Appointment reminders</h1>
+    {% if can(user.role, 'manage_settings') %}
+    <a class="btn ghost" href="/reminders/settings">Reminder settings</a>{% endif %}
+  </div>
+  <p class="muted" style="margin:.1rem 0 1.1rem">
+    Schedule a follow-up: we add the contact to GoHighLevel and drop them into the
+    workflow for that appointment type. Times are in {{ clinic_tz }}.</p>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}"
+       style="{{ 'background:#dcfce7;border-color:#86efac;color:#166534' if flash.ok }}">
+    {{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  {% if not reminders_enabled %}
+    <div class="card">
+      <h2>Connect GoHighLevel to turn this on</h2>
+      <p class="muted" style="margin-top:.2rem">Scheduling a reminder creates the contact and
+        adds them to a follow-up workflow in GoHighLevel, so it needs a connected sub-account.</p>
+      <ol class="setup-steps">
+        <li>In GoHighLevel → <strong>Settings → Private Integrations</strong>, give the token the
+            scopes <strong>View/Edit Contacts</strong> and <strong>View Workflows</strong>.</li>
+        <li>Set <code>GHL_API_TOKEN</code> and a reminder location (<code>GHL_REMINDER_LOCATION</code>,
+            or the first entry of <code>GHL_LOCATIONS</code>) in <code>.env</code>.</li>
+        <li>Double-click <code>restart.command</code>, then reload this page.</li>
+      </ol>
+    </div>
+
+  {% else %}
+    {% if not mapping_complete %}
+    <div class="banner" style="background:#fef3c7;border-color:#fcd34d;color:#92400e">
+      ⚠️ Some appointment types aren't linked to a workflow yet.
+      {% if can(user.role, 'manage_settings') %}
+      <a href="/reminders/settings" style="color:#92400e;font-weight:700">Finish the mapping →</a>
+      {% else %}Ask an administrator to finish the mapping in Reminder settings.{% endif %}
+    </div>
+    {% endif %}
+
+    {% if can(user.role, 'schedule_reminders') %}
+    <div class="card">
+      <h2>Schedule a reminder</h2>
+      <form method="post" action="/reminders" class="form-grid" autocomplete="off">
+        <label class="field">
+          <span>Contact name</span>
+          <input type="text" name="contact_name" required placeholder="Jane Doe">
+        </label>
+        <label class="field">
+          <span>Appointment type</span>
+          <select name="type_key" required>
+            <option value="" disabled selected>Choose one…</option>
+            {% for key, label in appt_types %}
+            <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Email</span>
+          <input type="email" name="email" placeholder="jane@example.com">
+        </label>
+        <label class="field">
+          <span>Phone</span>
+          <input type="tel" name="phone" placeholder="(902) 555-0123">
+        </label>
+        <label class="field">
+          <span>Appointment date &amp; time</span>
+          <input type="datetime-local" name="appt_at" required>
+        </label>
+        <div class="field field-actions">
+          <button class="btn" type="submit">Schedule reminder</button>
+          <span class="muted" style="font-size:.76rem">Email or phone is required.</span>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h2 style="margin-bottom:.7rem">Scheduled reminders</h2>
+      {% if appointments %}
+      <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr>
+          <th>Contact</th><th>Type</th><th>Appointment</th><th>Status</th><th></th>
+        </tr></thead>
+        <tbody>
+        {% for a in appointments %}
+        <tr class="{{ 'is-cancelled' if a.status == 'cancelled' }}">
+          <td>
+            <div class="who">{{ a.contact_name }}</div>
+            <div class="meta muted">{{ a.email or a.phone or '' }}</div>
+          </td>
+          <td><span class="pill">{{ a.type_label }}</span></td>
+          <td>{{ fmt_appt(a.appt_at) }}</td>
+          <td>
+            {% if a.status == 'cancelled' %}<span class="tag">Cancelled</span>
+            {% else %}<span class="tag responded">Scheduled</span>{% endif %}
+          </td>
+          <td style="text-align:right">
+            {% if a.status != 'cancelled' and can(user.role, 'schedule_reminders') %}
+            <form method="post" action="/reminders/{{ a.id }}/cancel" style="display:inline"
+                  onsubmit="return confirm('Mark this reminder cancelled?')">
+              <button class="btn ghost" type="submit"
+                      style="padding:.2rem .55rem;font-size:.76rem">Cancel</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <p class="muted" style="margin:.2rem 0">No reminders scheduled yet.</p>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endblock %}

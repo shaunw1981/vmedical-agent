@@ -34,6 +34,7 @@ import db
 import email_monitor
 import ghl
 import obsidian
+import reminders
 
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
@@ -209,6 +210,9 @@ def dashboard(request: Request):
             status_donut=status_donut,
             recent=db.list_messages()[:5],
             today=datetime.now().strftime("%A, %B %-d, %Y"),
+            upcoming_appts=db.list_upcoming_appointments(5),
+            upcoming_appts_count=db.count_upcoming_appointments(),
+            fmt_appt=reminders.format_appt,
         ),
     )
 
@@ -247,6 +251,159 @@ def social(request: Request, debug: int = 0):
             social_enabled=config.ghl_social_enabled(),
         ),
     )
+
+
+# --- Appointment reminders ---------------------------------------------------
+def _reminders_ctx(request: Request, user: dict, **extra) -> dict:
+    return _ctx(
+        request, user,
+        appt_types=config.APPOINTMENT_TYPES,
+        reminders_enabled=config.ghl_contacts_enabled(),
+        mapping_complete=reminders.mapping_complete(),
+        fmt_appt=reminders.format_appt,
+        clinic_tz=config.CLINIC_TIMEZONE,
+        flash=request.session.pop("reminder_flash", None),
+        **extra,
+    )
+
+
+@app.get("/reminders", response_class=HTMLResponse)
+def reminders_page(request: Request):
+    user, resp = _guard(request, "view_reminders")
+    if resp:
+        return resp
+    return templates.TemplateResponse(
+        "reminders.html",
+        _reminders_ctx(request, user, appointments=db.list_appointments()),
+    )
+
+
+@app.post("/reminders")
+def reminders_create(
+    request: Request,
+    contact_name: str = Form(...),
+    email: str = Form(""),
+    phone: str = Form(""),
+    appt_at: str = Form(...),
+    type_key: str = Form(...),
+):
+    user, resp = _guard(request, "schedule_reminders")
+    if resp:
+        return resp
+    result = reminders.schedule(
+        name=contact_name, appt_at=appt_at, type_key=type_key,
+        email=email, phone=phone, created_by=user["email"],
+    )
+    if result["ok"]:
+        request.session["reminder_flash"] = {
+            "ok": True, "msg": f"Reminder scheduled for {contact_name} — added to the "
+                               f"“{result['label']}” follow-up in GoHighLevel."}
+    else:
+        request.session["reminder_flash"] = {"ok": False, "msg": result["error"]}
+    return RedirectResponse("/reminders", status_code=303)
+
+
+@app.post("/reminders/{appt_id}/cancel")
+def reminders_cancel(request: Request, appt_id: int):
+    user, resp = _guard(request, "schedule_reminders")
+    if resp:
+        return resp
+    db.cancel_appointment(appt_id)
+    request.session["reminder_flash"] = {"ok": True, "msg": "Reminder marked cancelled "
+                                         "(this doesn't remove them from GoHighLevel)."}
+    return RedirectResponse("/reminders", status_code=303)
+
+
+@app.get("/reminders/settings", response_class=HTMLResponse)
+def reminders_settings(request: Request):
+    user, resp = _guard(request, "manage_settings")
+    if resp:
+        return resp
+    workflows, wf_error = [], None
+    if config.ghl_contacts_enabled():
+        try:
+            workflows = ghl.list_workflows(config.reminder_location_id())
+        except Exception as exc:  # noqa: BLE001
+            wf_error = str(exc)
+    return templates.TemplateResponse(
+        "reminders_settings.html",
+        _reminders_ctx(request, user, workflows=workflows, wf_error=wf_error,
+                       mapping=reminders.get_workflow_map()),
+    )
+
+
+@app.post("/reminders/settings")
+async def reminders_settings_save(request: Request):
+    user, resp = _guard(request, "manage_settings")
+    if resp:
+        return resp
+    form = await request.form()
+    # Build a name lookup so we can store the workflow's display name too.
+    names: dict[str, str] = {}
+    if config.ghl_contacts_enabled():
+        try:
+            names = {w["id"]: w["name"] for w in ghl.list_workflows(config.reminder_location_id())}
+        except Exception:  # noqa: BLE001
+            names = {}
+    for key, _label in config.APPOINTMENT_TYPES:
+        wid = (form.get(f"wf_{key}") or "").strip()
+        reminders.set_workflow_map(key, wid, names.get(wid, ""))
+    request.session["reminder_flash"] = {"ok": True, "msg": "Workflow mapping saved."}
+    return RedirectResponse("/reminders/settings", status_code=303)
+
+
+# --- JSON API (browser session OR X-API-Key) — for the future Chrome extension
+def _api_authorized(request: Request) -> Optional[str]:
+    """Returns the actor's email if authorized, else None."""
+    user = auth.current_user(request)
+    if user:
+        return user["email"]
+    key = request.headers.get("x-api-key", "")
+    if config.DASHBOARD_API_KEY and key == config.DASHBOARD_API_KEY:
+        return "api-key"
+    return None
+
+
+@app.get("/api/contacts/search")
+def api_contacts_search(request: Request, q: str = ""):
+    actor = _api_authorized(request)
+    if not actor:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if not config.ghl_contacts_enabled():
+        return JSONResponse({"error": "GoHighLevel not configured"}, status_code=503)
+    if len((q or "").strip()) < 2:
+        return {"contacts": []}
+    try:
+        return {"contacts": ghl.search_contacts(config.reminder_location_id(), q)}
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.post("/api/reminders")
+async def api_reminders_create(request: Request):
+    actor = _api_authorized(request)
+    if not actor:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "expected JSON"}, status_code=400)
+    result = reminders.schedule(
+        name=body.get("contact_name") or body.get("name") or "",
+        appt_at=body.get("appt_at") or "",
+        type_key=body.get("type_key") or "",
+        email=body.get("email") or "",
+        phone=body.get("phone") or "",
+        created_by=actor,
+    )
+    return JSONResponse(result, status_code=200 if result["ok"] else 400)
+
+
+@app.get("/api/appointment-types")
+def api_appointment_types(request: Request):
+    if not _api_authorized(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return {"types": [{"key": k, "label": l} for k, l in config.APPOINTMENT_TYPES]}
 
 
 # --- Message inbox -----------------------------------------------------------

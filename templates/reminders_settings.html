@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Reminder settings · Spa Dashboard{% endblock %}
+{% block nav %}reminders{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1 style="margin:0">Reminder settings</h1>
+    <a class="btn ghost" href="/reminders">← Back to reminders</a>
+  </div>
+  <p class="muted" style="margin:.1rem 0 1.1rem">
+    Link each appointment type to the GoHighLevel workflow that runs its follow-up.
+    When someone schedules that type, the contact is dropped into this workflow.</p>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}"
+       style="{{ 'background:#dcfce7;border-color:#86efac;color:#166534' if flash.ok }}">
+    {{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  {% if not reminders_enabled %}
+    <div class="card">
+      <h2>GoHighLevel isn't connected</h2>
+      <p class="muted">Set <code>GHL_API_TOKEN</code> and a reminder location in <code>.env</code>,
+        then restart, to load your workflows here.</p>
+    </div>
+  {% else %}
+    {% if wf_error %}
+    <div class="banner">⚠️ Couldn't load workflows from GoHighLevel.
+      <div style="margin-top:.4rem;font-size:.85rem;color:#7c2d12">{{ wf_error }}</div>
+      <div style="margin-top:.4rem;font-size:.82rem">You can still paste a workflow ID directly below.</div>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <form method="post" action="/reminders/settings" class="map-form">
+        {% for key, label in appt_types %}
+        <div class="map-row">
+          <label for="wf_{{ key }}" class="map-label">{{ label }}</label>
+          {% if workflows %}
+          <select id="wf_{{ key }}" name="wf_{{ key }}">
+            <option value="">— Not linked —</option>
+            {% for w in workflows %}
+            <option value="{{ w.id }}" {{ 'selected' if mapping[key].id == w.id }}>
+              {{ w.name }}{% if w.status %} ({{ w.status }}){% endif %}</option>
+            {% endfor %}
+          </select>
+          {% else %}
+          <input type="text" id="wf_{{ key }}" name="wf_{{ key }}"
+                 value="{{ mapping[key].id }}" placeholder="Paste GHL workflow ID">
+          {% endif %}
+        </div>
+        {% endfor %}
+        <div class="map-actions">
+          <button class="btn" type="submit">Save mapping</button>
+          {% if workflows %}<span class="muted" style="font-size:.8rem">
+            {{ workflows|length }} workflow{{ '' if workflows|length == 1 else 's' }} loaded from GoHighLevel.</span>{% endif %}
+        </div>
+      </form>
+    </div>
+  {% endif %}
+{% endblock %}
