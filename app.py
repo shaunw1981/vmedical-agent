@@ -13,6 +13,7 @@ See SETUP-MACMINI.md for how to run it and connect Google + GoHighLevel.
 import re
 import sqlite3
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -140,30 +141,39 @@ def dashboard(request: Request):
 
 
 # --- Message inbox -----------------------------------------------------------
-_SPEAKER_RE = re.compile(
-    r"^\s*(AI Agent|Assistant|Agent|Receptionist|AI|Bot|Caller|Customer|Client|User|Contact)\s*[:\-]\s*(.*)$",
-    re.IGNORECASE,
-)
+# A transcript line looks like "Speaker label: what they said". We split on the
+# FIRST colon so labels that contain their own dash/hyphen survive intact
+# (e.g. "Virtual Receptionist - PEI:"). The label is then classified below.
+_SPEAKER_RE = re.compile(r"^\s*(?P<label>[^:\n]{1,50}):\s*(?P<said>.*)$")
+# Which side of the conversation a speaker label belongs to.
+_AGENT_RE = re.compile(r"receptionist|assistant|\bagent\b|\bai\b|\bbot\b|virtual", re.I)
+_CALLER_RE = re.compile(r"\byou\b|caller|customer|\bclient\b|contact|guest|\buser\b", re.I)
 
 
-def _parse_transcript(text: str) -> list[dict]:
+def _parse_transcript(text: str, caller_name: Optional[str] = None) -> list[dict]:
     """
     Turn a call transcript into a list of conversation turns:
     [{role: 'agent'|'caller'|'other', label: str, text: str}, ...]
     so the page can show who said what.
+
+    The agent side keeps its real label from the transcript (e.g.
+    "Virtual Receptionist - PEI"); the caller side is shown as the caller's
+    name when we know it, instead of a generic "You"/"Caller".
     """
     if not text:
         return []
+    caller_label = (caller_name or "").strip() or "Caller"
     turns: list[dict] = []
     current = None
     for line in text.splitlines():
         m = _SPEAKER_RE.match(line)
-        if m:
-            speaker, said = m.group(1), m.group(2).strip()
-            if re.search(r"agent|assistant|receptionist|bot|\bai\b", speaker, re.I):
-                role, label = "agent", "AI Receptionist"
+        speaker = m.group("label").strip() if m else ""
+        if m and (_AGENT_RE.search(speaker) or _CALLER_RE.search(speaker)):
+            said = m.group("said").strip()
+            if _AGENT_RE.search(speaker):
+                role, label = "agent", speaker
             else:
-                role, label = "caller", "Caller"
+                role, label = "caller", caller_label
             current = {"role": role, "label": label, "text": said}
             turns.append(current)
         elif line.strip():
@@ -182,7 +192,7 @@ def messages_inbox(request: Request, status: str = "new"):
     status_filter = None if status == "all" else status
     messages = db.list_messages(status_filter)
     for m in messages:
-        turns = _parse_transcript(m.get("transcript") or "")
+        turns = _parse_transcript(m.get("transcript") or "", m.get("client_name"))
         m["turns"] = turns
         m["is_conversation"] = any(t["role"] in ("agent", "caller") for t in turns)
     return templates.TemplateResponse(
