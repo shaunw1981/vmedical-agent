@@ -486,9 +486,49 @@ def raw_debug() -> list[dict]:
     return out
 
 
+def token_scopes() -> dict:
+    """
+    Decode which scopes the configured token actually grants. GHL access tokens
+    (including Private Integration Tokens) are JWTs whose payload lists the
+    granted scopes under oauthMeta.scopes. This reads that list locally and
+    NEVER returns the token itself — so we can tell whether the reviews scope is
+    really present without a 401 round-trip or exposing the secret.
+    """
+    import base64
+    import json as _json
+
+    tok = config.GHL_API_TOKEN or ""
+    if not tok:
+        return {"configured": False, "note": "GHL_API_TOKEN is not set."}
+    parts = tok.split(".")
+    if len(parts) != 3:
+        return {"configured": True, "is_jwt": False,
+                "note": "Token is not a decodable JWT — verify the selected scopes "
+                        "directly in GHL → Settings → Private Integrations."}
+    try:
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+        data = _json.loads(base64.urlsafe_b64decode(payload))
+    except Exception as exc:  # noqa: BLE001
+        return {"configured": True, "is_jwt": True, "error": f"Could not decode: {exc}"}
+
+    meta = data.get("oauthMeta") if isinstance(data.get("oauthMeta"), dict) else {}
+    scopes = meta.get("scopes") or data.get("scopes") or data.get("scope") or []
+    if isinstance(scopes, str):
+        scopes = scopes.split()
+    return {
+        "configured": True,
+        "is_jwt": True,
+        "authClass": data.get("authClass"),
+        "authClassId": data.get("authClassId") or data.get("primaryAuthClassId"),
+        "scope_count": len(scopes),
+        "has_reviews_read": any("review" in s.lower() or "reputation" in s.lower() for s in scopes),
+        "scopes": sorted(scopes),
+    }
+
+
 def reviews_raw_debug() -> list[dict]:
     """Credential-redacted raw reviews responses, for /reviews?debug=1."""
-    out: list[dict] = []
+    out: list[dict] = [{"token_scopes": token_scopes()}]
     for loc in config.GHL_LOCATIONS:
         entry: dict = {"location": loc}
         try:
