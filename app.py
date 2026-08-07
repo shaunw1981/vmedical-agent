@@ -315,10 +315,21 @@ def reminders_cancel(request: Request, appt_id: int):
 
 
 @app.get("/reminders/settings", response_class=HTMLResponse)
-def reminders_settings(request: Request):
+def reminders_settings(request: Request, debug: int = 0):
     user, resp = _guard(request, "manage_settings")
     if resp:
         return resp
+    # Diagnostic dump — confirm GHL's contact/workflow response shapes on connect.
+    if debug:
+        import json
+        from fastapi.responses import PlainTextResponse
+        if not config.ghl_contacts_enabled():
+            return PlainTextResponse("GHL not configured (set GHL_API_TOKEN and a reminder location).")
+        try:
+            return PlainTextResponse(
+                json.dumps(ghl.reminders_debug(config.reminder_location_id()), indent=2, default=str))
+        except Exception as exc:  # noqa: BLE001
+            return PlainTextResponse(f"ERROR: {exc}", status_code=500)
     workflows, wf_error = [], None
     if config.ghl_contacts_enabled():
         try:

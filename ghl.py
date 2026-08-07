@@ -378,6 +378,22 @@ def add_contact_to_workflow(contact_id: str, workflow_id: str,
     return _post(f"/contacts/{contact_id}/workflow/{workflow_id}", body)
 
 
+def reminders_debug(location_id: str, sample_query: str = "a") -> dict:
+    """Credential-redacted raw contact/workflow responses, for /reminders/settings?debug=1."""
+    out: dict = {"location_id": location_id}
+    try:
+        out["workflows_raw"] = _redact(_get("/workflows/", params={"locationId": location_id}))
+    except Exception as exc:  # noqa: BLE001
+        out["workflows_error"] = str(exc)
+    try:
+        out["contacts_search_raw"] = _redact(
+            _get("/contacts/", params={"locationId": location_id, "query": sample_query, "limit": 2})
+        )
+    except Exception as exc:  # noqa: BLE001
+        out["contacts_search_error"] = str(exc)
+    return out
+
+
 def raw_debug() -> list[dict]:
     """Credential-redacted raw API responses, for /social?debug=1."""
     out: list[dict] = []
