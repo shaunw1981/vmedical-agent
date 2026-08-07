@@ -357,6 +357,7 @@ def _norm_review(r: dict) -> dict:
     replied = bool(reply) or replied_flag is True or status == "replied"
 
     return {
+        "id": str(_first(r, "id", "_id", "reviewId", "reviewID", default="") or ""),
         "reviewer": (reviewer or "Anonymous").strip() or "Anonymous",
         "rating": rating,
         "text": (text or "").strip(),
@@ -378,6 +379,7 @@ def reviews_overview(now: Optional[datetime] = None,
         for raw in get_reviews(loc["id"], limit=per_location_limit):
             nr = _norm_review(raw)
             nr["location"] = loc["label"] or ""
+            nr["location_id"] = loc["id"]
             all_reviews.append(nr)
 
     all_reviews.sort(key=lambda r: r["_sort"], reverse=True)
@@ -414,6 +416,27 @@ def reviews_overview(now: Optional[datetime] = None,
         "sampled": count >= capped,
         "generated_at": now.strftime("%b %-d, %Y at %-I:%M %p UTC"),
     }
+
+
+def reply_to_review(review_id: str, location_id: str, text: str) -> dict:
+    """
+    Post a public reply to a review (WRITE — requires the reputation write scope
+    on the Private Integration Token). Reaches GoHighLevel, which publishes the
+    reply to the underlying Google/Facebook review.
+
+    The exact reply endpoint isn't in the public docs we could reach; this uses
+    the documented pattern (reviewId in the path, {reply, locationId} body). If
+    GoHighLevel rejects it, _handle() raises with the status + message so the UI
+    can show it — a failed call publishes nothing. If your GHL API expects a
+    different path/body, this is the single place to adjust.
+    """
+    review_id = (review_id or "").strip()
+    if not review_id:
+        raise ValueError("Missing review id — can't post a reply.")
+    return _post(
+        f"/reputation/reviews/{review_id}/reply",
+        {"reply": text, "locationId": location_id},
+    )
 
 
 # --- Diagnostics -------------------------------------------------------------

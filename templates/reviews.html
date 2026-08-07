@@ -12,6 +12,12 @@
   <p class="muted" style="margin:.1rem 0 1.1rem">
     Your Google &amp; Facebook reviews, pulled from GoHighLevel's Reputation manager.</p>
 
+  {% if review_flash %}
+  <div class="banner {{ 'info' if review_flash.ok else '' }}"
+       style="{{ 'background:#dcfce7;border-color:#86efac;color:#166534' if review_flash.ok }}">
+    {{ '✓' if review_flash.ok else '⚠️' }} {{ review_flash.msg }}</div>
+  {% endif %}
+
   {% if not reviews_enabled %}
     <div class="card">
       <h2>Connect GoHighLevel to turn this on</h2>
@@ -120,6 +126,22 @@
             </div>
             {% if r.text %}<div class="review-text">{{ r.text }}</div>{% endif %}
             {% if r.reply %}<div class="review-reply"><span class="review-reply-label">Your reply</span>{{ r.reply }}</div>{% endif %}
+
+            {% if can(user.role, 'respond_reviews') and r.id and not r.replied %}
+            <details class="reply-box">
+              <summary>Reply to this review</summary>
+              <form method="post" action="/reviews/reply" class="reply-form">
+                <input type="hidden" name="review_id" value="{{ r.id }}">
+                <input type="hidden" name="location_id" value="{{ r.location_id }}">
+                <textarea name="reply" rows="3" required
+                  placeholder="Write a public reply to {{ r.reviewer }}…"></textarea>
+                <div class="reply-actions">
+                  <span class="muted" style="font-size:.76rem">Posts publicly on {{ r.source }} via GoHighLevel.</span>
+                  <button class="btn" type="submit">Send reply</button>
+                </div>
+              </form>
+            </details>
+            {% endif %}
           </div>
         </div>
         {% endfor %}

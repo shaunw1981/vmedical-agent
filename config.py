@@ -115,6 +115,7 @@ DEFAULT_ROLE = "team_member"
 #   manage_settings   - change system settings (future)
 #   view_social       - see the social-media posting-activity dashboard
 #   view_reviews      - see the Google/Facebook reviews (reputation) dashboard
+#   respond_reviews   - post a public reply to a review (needs GHL write scope)
 ROLE_CAPABILITIES = {
     "super_admin": {
         "view_messages",
@@ -123,6 +124,7 @@ ROLE_CAPABILITIES = {
         "manage_settings",
         "view_social",
         "view_reviews",
+        "respond_reviews",
     },
     "spa_manager": {
         "view_messages",
@@ -130,6 +132,7 @@ ROLE_CAPABILITIES = {
         "manage_users",  # managers can manage team members (but not super admins)
         "view_social",
         "view_reviews",
+        "respond_reviews",
     },
     "team_member": {
         "view_messages",

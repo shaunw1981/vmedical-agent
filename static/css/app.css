@@ -310,6 +310,18 @@ select, input { padding:.4rem .55rem; border:1px solid var(--line); border-radiu
   border-radius:var(--radius-sm); padding:.55rem .75rem; font-size:.88rem; color:#2b332e; }
 .review-reply-label { display:block; font-size:.66rem; text-transform:uppercase; letter-spacing:.06em;
   color:var(--brand-strong); font-weight:700; margin-bottom:.2rem; }
+.reply-box { margin-top:.55rem; }
+.reply-box > summary { cursor:pointer; color:var(--brand-strong); font-size:.83rem; font-weight:600;
+  list-style:none; user-select:none; display:inline-block; }
+.reply-box > summary::-webkit-details-marker { display:none; }
+.reply-box > summary::before { content:"↩  "; }
+.reply-form { margin-top:.5rem; }
+.reply-form textarea { width:100%; resize:vertical; font-family:inherit; font-size:.9rem;
+  padding:.6rem .7rem; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--card);
+  color:var(--ink); }
+.reply-form textarea:focus { outline:2px solid var(--brand-tint-2); border-color:var(--brand); }
+.reply-actions { display:flex; align-items:center; justify-content:space-between; gap:.8rem;
+  margin-top:.5rem; flex-wrap:wrap; }
 
 /* ---- Responsive -------------------------------------------------------- */
 @media (max-width:1023px){ :root{ --sidebar-w:210px; } main{ padding:0 1.1rem; } }

@@ -280,8 +280,32 @@ def reviews(request: Request, debug: int = 0):
             reviews=data,
             reviews_error=error,
             reviews_enabled=config.ghl_reviews_enabled(),
+            review_flash=request.session.pop("review_flash", None),
         ),
     )
+
+
+@app.post("/reviews/reply")
+def reply_review(
+    request: Request,
+    review_id: str = Form(...),
+    location_id: str = Form(...),
+    reply: str = Form(...),
+):
+    """Post a public reply to a review via GoHighLevel (needs write scope)."""
+    user, resp = _guard(request, "respond_reviews")
+    if resp:
+        return resp
+    text = (reply or "").strip()
+    if not text:
+        request.session["review_flash"] = {"ok": False, "msg": "Reply was empty — nothing sent."}
+        return RedirectResponse("/reviews", status_code=303)
+    try:
+        ghl.reply_to_review(review_id, location_id, text)
+        request.session["review_flash"] = {"ok": True, "msg": "Reply sent to GoHighLevel."}
+    except Exception as exc:  # noqa: BLE001
+        request.session["review_flash"] = {"ok": False, "msg": f"Couldn't post reply: {exc}"}
+    return RedirectResponse("/reviews", status_code=303)
 
 
 # --- Message inbox -----------------------------------------------------------
