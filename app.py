@@ -485,10 +485,44 @@ def client_detail(request: Request, contact_id: str, debug: int = 0):
         _ctx(request, user,
              contact_id=contact_id, contact=contact, notes=notes,
              ghl_appts=ghl_appts, local_appts=local_appts, calls=calls,
-             errors=errors, fmt_appt=reminders.format_appt,
+             errors=errors, fmt_appt=reminders.format_appt, fmt_dt=reminders.format_iso,
              ghl_enabled=config.ghl_contacts_enabled(),
              flash=request.session.pop("client_flash", None)),
     )
+
+
+@app.post("/clients/{contact_id}/edit")
+def client_edit(
+    request: Request,
+    contact_id: str,
+    first_name: str = Form(""),
+    last_name: str = Form(""),
+    email: str = Form(""),
+    phone: str = Form(""),
+    address1: str = Form(""),
+    city: str = Form(""),
+    state: str = Form(""),
+    postal_code: str = Form(""),
+):
+    user, resp = _guard(request, "view_clients")
+    if resp:
+        return resp
+    fields = {
+        "firstName": first_name.strip(),
+        "lastName": last_name.strip(),
+        "email": email.strip(),
+        "phone": phone.strip(),
+        "address1": address1.strip(),
+        "city": city.strip(),
+        "state": state.strip(),
+        "postalCode": postal_code.strip(),
+    }
+    try:
+        ghl.update_contact(contact_id, fields)
+        request.session["client_flash"] = {"ok": True, "msg": "Contact details updated."}
+    except Exception as exc:  # noqa: BLE001
+        request.session["client_flash"] = {"ok": False, "msg": f"Couldn't update contact: {exc}"}
+    return RedirectResponse(f"/clients/{contact_id}", status_code=303)
 
 
 @app.post("/clients/{contact_id}/note")

@@ -345,6 +345,7 @@ select, input { padding:.4rem .55rem; border:1px solid var(--line); border-radiu
 
 @media (max-width:640px){
   .appt-form .field-row { grid-template-columns:1fr; gap:1.2rem; }
+  .edit-form .field-row, .edit-form .field-row.three { grid-template-columns:1fr; }
   .map-row { grid-template-columns:1fr; gap:.3rem; }
   .map-row.map-head { display:none; }
 }
@@ -368,15 +369,39 @@ select, input { padding:.4rem .55rem; border:1px solid var(--line); border-radiu
 .detail-list dd { margin:0; font-size:.93rem; word-break:break-word; }
 .tag-row { display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.9rem; }
 
-.note-form textarea, .reply-box textarea { width:100%; font-family:inherit; font-size:.93rem;
-  color:var(--ink); background:var(--card); border:1px solid var(--line);
-  border-radius:var(--radius-sm); padding:.6rem .7rem; resize:vertical; }
-.note-form textarea:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px var(--brand-tint); }
-.note-form { margin-bottom:1rem; }
+/* Inline edit (toggled by the hidden .toggle-edit checkbox) */
+.toggle-edit ~ .edit-form { display:none; }
+.toggle-edit:checked ~ .edit-form { display:flex; flex-direction:column; gap:1rem; margin-top:.3rem; }
+.toggle-edit:checked ~ .detail-view { display:none; }
+.toggle-edit:checked ~ .page-head .edit-open { display:none; }
+.edit-form .field-row { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+.edit-form .field-row.three { grid-template-columns:1fr 1fr 1fr; }
+.edit-actions { display:flex; justify-content:flex-end; gap:.8rem; margin-top:.2rem; }
+
+/* Notes: nicer cards + add-note modal */
 .note-list, .hist-list { display:flex; flex-direction:column; gap:.6rem; }
-.note-item { border-left:3px solid var(--brand-tint-2); padding:.15rem 0 .15rem .7rem; }
-.note-when { font-size:.76rem; margin-bottom:.15rem; }
-.note-body { font-size:.93rem; white-space:pre-wrap; }
+.note-item { background:var(--brand-tint); border:1px solid var(--brand-tint-2);
+  border-radius:var(--radius-sm); padding:.7rem .85rem; }
+.note-head { display:flex; align-items:center; gap:.45rem; margin-bottom:.35rem; }
+.note-icon { font-size:.9rem; }
+.note-when { font-size:.76rem; color:var(--muted); font-weight:600; }
+.note-body { font-size:.94rem; white-space:pre-wrap; line-height:1.5; }
+
+.modal-overlay { display:none; position:fixed; inset:0; z-index:60; align-items:center;
+  justify-content:center; padding:1rem; }
+.modal-toggle:checked ~ .modal-overlay { display:flex; }
+.modal-backdrop { position:absolute; inset:0; background:rgba(20,30,25,.45); }
+.modal { position:relative; z-index:1; background:var(--card); border-radius:var(--radius);
+  padding:1.2rem 1.3rem; width:100%; max-width:460px; box-shadow:var(--shadow-lift); }
+.modal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:.7rem; }
+.modal-close { cursor:pointer; font-size:1.5rem; line-height:1; color:var(--muted); padding:0 .3rem; }
+.modal-close:hover { color:var(--ink); }
+.modal textarea { width:100%; font-family:inherit; font-size:.94rem; color:var(--ink);
+  background:var(--card); border:1px solid var(--line); border-radius:var(--radius-sm);
+  padding:.6rem .7rem; resize:vertical; }
+.modal textarea:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px var(--brand-tint); }
+.modal-actions { display:flex; justify-content:flex-end; gap:.8rem; margin-top:.9rem; }
+
 .hist-item { padding:.5rem .1rem; border-bottom:1px solid var(--line); }
 .hist-item:last-child { border-bottom:0; }
 .hist-item.is-cancelled { opacity:.55; }

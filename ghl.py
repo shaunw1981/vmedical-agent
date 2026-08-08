@@ -51,6 +51,13 @@ def _post(path: str, body: dict, params: Optional[dict] = None) -> dict:
     return _handle(r)
 
 
+def _put(path: str, body: dict, params: Optional[dict] = None) -> dict:
+    url = f"{config.GHL_API_BASE}{path}"
+    with httpx.Client(timeout=20) as client:
+        r = client.put(url, headers=_headers(), params=params, json=body)
+    return _handle(r)
+
+
 def _handle(r: httpx.Response) -> dict:
     if r.status_code >= 400:
         snippet = (r.text or "").strip()
@@ -426,13 +433,26 @@ def get_contact(contact_id: str) -> dict:
     return {
         "id": str(_first(c, "id", "_id", default=contact_id)),
         "name": name or "(no name)",
+        "first": _first(c, "firstName", default=""),
+        "last": _first(c, "lastName", default=""),
         "email": _first(c, "email", default=""),
         "phone": _first(c, "phone", default=""),
+        "address1": _first(c, "address1", default=""),
+        "city": _first(c, "city", default=""),
+        "state": _first(c, "state", default=""),
+        "postal": _first(c, "postalCode", default=""),
+        "country": _first(c, "country", default=""),
         "address": addr,
         "tags": [str(t) for t in tags],
         "created": _first(c, "dateAdded", "createdAt", default=""),
         "source": _first(c, "source", default=""),
     }
+
+
+def update_contact(contact_id: str, fields: dict) -> dict:
+    """Update a contact's details. Only non-None fields are sent."""
+    body = {k: v for k, v in fields.items() if v is not None}
+    return _put(f"/contacts/{contact_id}", body)
 
 
 def list_contact_notes(contact_id: str) -> list[dict]:

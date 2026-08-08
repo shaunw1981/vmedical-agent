@@ -2,6 +2,7 @@
 {% block title %}{{ contact.name if contact else 'Client' }} · Spa Dashboard{% endblock %}
 {% block nav %}clients{% endblock %}
 {% block content %}
+  {% set editable = contact and ghl_enabled and not errors.contact %}
   <div class="page-head">
     <h1 style="margin:0">{{ contact.name if contact else 'Client record' }}</h1>
     <a class="btn ghost" href="/clients">← All clients</a>
@@ -21,53 +22,114 @@
 
   <div class="client-grid">
     <div>
-      <!-- Contact details -->
+      <!-- Contact details (view + inline edit) -->
       <div class="card">
-        <h2>Contact details</h2>
-        {% if contact %}
-        <dl class="detail-list">
-          <div><dt>Email</dt><dd>{{ contact.email or '—' }}</dd></div>
-          <div><dt>Phone</dt><dd>{{ contact.phone or '—' }}</dd></div>
-          {% if contact.address %}<div><dt>Address</dt><dd>{{ contact.address }}</dd></div>{% endif %}
-          {% if contact.created %}<div><dt>Added</dt><dd>{{ contact.created.replace('T',' ')[:16] }}</dd></div>{% endif %}
-          {% if contact.source %}<div><dt>Source</dt><dd>{{ contact.source }}</dd></div>{% endif %}
-        </dl>
-        {% if contact.tags %}
-        <div class="tag-row">{% for t in contact.tags %}<span class="pill">{{ t }}</span>{% endfor %}</div>
-        {% endif %}
-        {% else %}
-        <p class="muted" style="margin:.2rem 0">No GoHighLevel details available for this client.</p>
+        <input type="checkbox" id="edit-toggle" class="visually-hidden toggle-edit">
+        <div class="page-head" style="margin-bottom:.5rem">
+          <h2 style="margin:0">Contact details</h2>
+          {% if editable %}<label for="edit-toggle" class="btn ghost edit-open">Edit</label>{% endif %}
+        </div>
+
+        <div class="detail-view">
+          {% if contact %}
+          <dl class="detail-list">
+            <div><dt>Email</dt><dd>{{ contact.email or '—' }}</dd></div>
+            <div><dt>Phone</dt><dd>{{ contact.phone or '—' }}</dd></div>
+            {% if contact.address %}<div><dt>Address</dt><dd>{{ contact.address }}</dd></div>{% endif %}
+            {% if contact.created %}<div><dt>Added</dt><dd>{{ fmt_dt(contact.created) }}</dd></div>{% endif %}
+            {% if contact.source %}<div><dt>Source</dt><dd>{{ contact.source }}</dd></div>{% endif %}
+          </dl>
+          {% if contact.tags %}
+          <div class="tag-row">{% for t in contact.tags %}<span class="pill">{{ t }}</span>{% endfor %}</div>
+          {% endif %}
+          {% else %}
+          <p class="muted" style="margin:.2rem 0">No GoHighLevel details available for this client.</p>
+          {% endif %}
+        </div>
+
+        {% if editable %}
+        <form method="post" action="/clients/{{ contact_id }}/edit" class="edit-form">
+          <div class="field-row">
+            <label class="field"><span>First name</span>
+              <input type="text" name="first_name" value="{{ contact.first }}"></label>
+            <label class="field"><span>Last name</span>
+              <input type="text" name="last_name" value="{{ contact.last }}"></label>
+          </div>
+          <div class="field-row">
+            <label class="field"><span>Email</span>
+              <input type="email" name="email" value="{{ contact.email }}"></label>
+            <label class="field"><span>Phone</span>
+              <input type="tel" name="phone" value="{{ contact.phone }}"></label>
+          </div>
+          <label class="field"><span>Street address</span>
+            <input type="text" name="address1" value="{{ contact.address1 }}"></label>
+          <div class="field-row three">
+            <label class="field"><span>City</span>
+              <input type="text" name="city" value="{{ contact.city }}"></label>
+            <label class="field"><span>Province / State</span>
+              <input type="text" name="state" value="{{ contact.state }}"></label>
+            <label class="field"><span>Postal code</span>
+              <input type="text" name="postal_code" value="{{ contact.postal }}"></label>
+          </div>
+          <div class="edit-actions">
+            <label for="edit-toggle" class="btn ghost">Cancel</label>
+            <button class="btn" type="submit">Save changes</button>
+          </div>
+        </form>
         {% endif %}
       </div>
 
-      <!-- Notes -->
+      <!-- Notes (list + add-note modal) -->
       <div class="card">
-        <h2>Notes</h2>
-        {% if can(user.role, 'view_clients') and ghl_enabled and not errors.contact %}
-        <form method="post" action="/clients/{{ contact_id }}/note" class="note-form">
-          <textarea name="body" rows="3" required placeholder="Add a note to this client's record…"></textarea>
-          <div style="text-align:right;margin-top:.5rem"><button class="btn" type="submit">Add note</button></div>
-        </form>
+        <input type="checkbox" id="note-modal" class="visually-hidden modal-toggle">
+        <div class="page-head" style="margin-bottom:.6rem">
+          <h2 style="margin:0">Notes {% if notes %}<span class="pill">{{ notes|length }}</span>{% endif %}</h2>
+          {% if editable %}<label for="note-modal" class="btn note-open">+ Add note</label>{% endif %}
+        </div>
+
+        {% if editable %}
+        <div class="modal-overlay">
+          <label for="note-modal" class="modal-backdrop" aria-label="Close"></label>
+          <div class="modal" role="dialog" aria-modal="true" aria-label="Add note">
+            <div class="modal-head">
+              <h3 style="margin:0">Add note</h3>
+              <label for="note-modal" class="modal-close" aria-label="Close">×</label>
+            </div>
+            <form method="post" action="/clients/{{ contact_id }}/note">
+              <textarea name="body" rows="5" required
+                placeholder="Write a note for {{ contact.name }}…"></textarea>
+              <div class="modal-actions">
+                <label for="note-modal" class="btn ghost">Cancel</label>
+                <button class="btn" type="submit">Save note</button>
+              </div>
+            </form>
+          </div>
+        </div>
         {% endif %}
+
         {% if errors.notes %}
         <p class="muted" style="font-size:.85rem">Couldn't load notes: {{ errors.notes }}</p>
         {% elif notes %}
         <div class="note-list">
           {% for n in notes %}
           <div class="note-item">
-            {% if n.created %}<div class="note-when muted">{{ n.created.replace('T',' ')[:16] }}</div>{% endif %}
+            <div class="note-head">
+              <span class="note-icon" aria-hidden="true">🗒️</span>
+              <span class="note-when">{{ fmt_dt(n.created) or 'Note' }}</span>
+            </div>
             <div class="note-body">{{ n.body }}</div>
           </div>
           {% endfor %}
         </div>
         {% else %}
-        <p class="muted" style="margin:.2rem 0">No notes yet.</p>
+        <p class="muted" style="margin:.2rem 0">No notes yet.
+          {% if editable %}Add the first one with <strong>+ Add note</strong>.{% endif %}</p>
         {% endif %}
       </div>
     </div>
 
     <div>
-      <!-- Appointment history -->
+      <!-- Appointment history (GHL) -->
       <div class="card">
         <h2>Appointment history</h2>
         {% if errors.appointments %}
@@ -78,8 +140,7 @@
           {% for a in ghl_appts %}
           <div class="hist-item">
             <div class="hist-main">{{ a.title or 'Appointment' }}</div>
-            <div class="meta muted">{{ a.start.replace('T',' ')[:16] if a.start else '' }}
-              {% if a.status %}· {{ a.status }}{% endif %}</div>
+            <div class="meta muted">{{ fmt_dt(a.start) }}{% if a.status %} · {{ a.status }}{% endif %}</div>
           </div>
           {% endfor %}
         </div>
@@ -114,7 +175,7 @@
           {% for m in calls %}
           <a class="hist-item" href="/messages" style="text-decoration:none;color:inherit">
             <div class="hist-main">{{ (m.summary or 'Call transcript')[:80] }}</div>
-            <div class="meta muted">{{ m.created_at.replace('T',' ')[:16] }}
+            <div class="meta muted">{{ fmt_dt(m.created_at) }}
               · {{ 'Responded' if m.status == 'responded' else 'New' }}</div>
           </a>
           {% endfor %}

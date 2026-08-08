@@ -73,6 +73,17 @@ def format_appt(appt_at: str) -> str:
         return appt_at
 
 
+def format_iso(value: str) -> str:
+    """Friendly display for any ISO8601 timestamp (with Z or offset)."""
+    if not value:
+        return ""
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).strftime(
+            "%b %-d, %Y · %-I:%M %p")
+    except (ValueError, TypeError):
+        return str(value)[:16].replace("T", " ")
+
+
 # --- Workflow mapping (type_key -> GHL workflow) -----------------------------
 def get_workflow_map() -> dict[str, dict]:
     """{type_key: {'id': workflow_id, 'name': workflow_name}} for every type.
