@@ -138,15 +138,27 @@ def list_posts(location_id: str, limit: int = 100,
     return (inner.get("posts") if isinstance(inner, dict) else None) or []
 
 
+def _ms(dt: Optional[datetime]) -> Optional[int]:
+    return int(dt.timestamp() * 1000) if dt else None
+
+
 def get_statistics(location_id: str, profile_ids: list[str],
-                   platforms: Optional[list[str]] = None) -> dict:
+                   platforms: Optional[list[str]] = None,
+                   start: Optional[datetime] = None,
+                   end: Optional[datetime] = None) -> dict:
     """
-    Advanced Analytics for the given account profileIds (last 7 days, with a
-    change vs the previous 7). Returns the parsed `results` object.
+    Advanced Analytics for the given account profileIds. With no start/end it
+    defaults to the last 7 days vs the previous 7; with a range, GoHighLevel
+    reports that window and compares it to the immediately-preceding one.
+    Returns the parsed `results` object.
     """
     body: dict = {"profileIds": profile_ids}
     if platforms:
         body["platforms"] = platforms
+    if start and end:
+        # Best-guess field names/format (epoch ms); confirm via /social?debug=1.
+        body["startDate"] = _ms(start)
+        body["endDate"] = _ms(end)
     data = _post("/social-media-posting/statistics", body, params={"locationId": location_id})
     return data.get("results", data) if isinstance(data, dict) else {}
 
@@ -174,13 +186,14 @@ def _metric(breakdowns: dict, totals: dict, name: str) -> dict:
     return {"value": value, "change": change}
 
 
-def _stats_for(location_id: str, account: dict) -> Optional[dict]:
+def _stats_for(location_id: str, account: dict,
+               start: Optional[datetime] = None, end: Optional[datetime] = None) -> Optional[dict]:
     """Per-page performance metrics, or None if this platform has no analytics."""
     profile_id = _first(account, "profileId", "profileID")
     platform = (_first(account, "platform", default="") or "").lower()
     if not profile_id or platform not in _STAT_PLATFORMS:
         return None
-    res = get_statistics(location_id, [str(profile_id)], [platform])
+    res = get_statistics(location_id, [str(profile_id)], [platform], start=start, end=end)
     totals = (res.get("totals") if isinstance(res, dict) else None) or {}
     bd = (res.get("breakdowns") if isinstance(res, dict) else None) or {}
     return {
@@ -228,7 +241,9 @@ def _freshness(days_since: Optional[int]) -> str:
     return "stale"
 
 
-def social_overview(now: Optional[datetime] = None) -> dict:
+def social_overview(now: Optional[datetime] = None,
+                    start: Optional[datetime] = None, end: Optional[datetime] = None,
+                    window_label: Optional[str] = None) -> dict:
     now = now or datetime.now(timezone.utc)
     locations_out: list[dict] = []
     totals = {"accounts": 0, "reach": 0, "impressions": 0, "engagement": 0,
@@ -258,7 +273,7 @@ def social_overview(now: Optional[datetime] = None) -> dict:
             avatar = _first(a, "avatar", "picture", default="")
 
             try:
-                perf = _stats_for(loc_id, a)
+                perf = _stats_for(loc_id, a, start=start, end=end)
             except Exception:  # noqa: BLE001
                 perf = None
             if perf:
@@ -297,7 +312,7 @@ def social_overview(now: Optional[datetime] = None) -> dict:
         "locations": locations_out,
         "totals": totals,
         "stats_ok": stats_ok,
-        "window": "Last 7 days vs previous 7",
+        "window": window_label or "Last 7 days vs previous 7",
         "generated_at": now.strftime("%b %-d, %Y at %-I:%M %p UTC"),
     }
 
@@ -523,7 +538,7 @@ def reminders_debug(location_id: str, sample_query: str = "a") -> dict:
     return out
 
 
-def raw_debug() -> list[dict]:
+def raw_debug(start: Optional[datetime] = None, end: Optional[datetime] = None) -> list[dict]:
     """Credential-redacted raw API responses, for /social?debug=1."""
     out: list[dict] = []
     for loc in config.GHL_LOCATIONS:
@@ -541,11 +556,14 @@ def raw_debug() -> list[dict]:
                     platforms.add(plat)
         except Exception as exc:  # noqa: BLE001
             entry["accounts_error"] = str(exc)
+        stat_body: dict = {"profileIds": profile_ids, "platforms": list(platforms)}
+        if start and end:
+            stat_body["startDate"] = _ms(start)
+            stat_body["endDate"] = _ms(end)
+        entry["statistics_request"] = {k: v for k, v in stat_body.items() if k in ("startDate", "endDate")}
         try:
             entry["statistics_raw"] = _redact(
-                _post("/social-media-posting/statistics",
-                      {"profileIds": profile_ids, "platforms": list(platforms)},
-                      params={"locationId": lid})
+                _post("/social-media-posting/statistics", stat_body, params={"locationId": lid})
             )
         except Exception as exc:  # noqa: BLE001
             entry["statistics_error"] = str(exc)

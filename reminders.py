@@ -53,6 +53,11 @@ def _localize(local_dt: datetime) -> datetime:
     return local_dt
 
 
+def localize(local_dt: datetime) -> datetime:
+    """Public: attach the clinic timezone to a naive datetime."""
+    return _localize(local_dt)
+
+
 def to_ghl_event_time(local_dt: datetime) -> str:
     """A naive local appointment time -> ISO8601 with the clinic's UTC offset."""
     return _localize(local_dt).isoformat()

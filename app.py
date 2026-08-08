@@ -12,7 +12,7 @@ See SETUP-MACMINI.md for how to run it and connect Google + GoHighLevel.
 
 import re
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -218,27 +218,55 @@ def dashboard(request: Request):
 
 
 # --- Social media metrics ----------------------------------------------------
+def _resolve_social_range(range_key: str, start: str, end: str):
+    """Turn the ?range/&start/&end query into (key, start_str, end_str, start_dt, end_dt, label)."""
+    today = date.today()
+    key = range_key if range_key in ("7", "30", "90", "custom") else "7"
+    sd = ed = None
+    if key == "custom":
+        try:
+            sd, ed = date.fromisoformat(start), date.fromisoformat(end)
+            if ed < sd:
+                sd, ed = ed, sd
+        except (ValueError, TypeError):
+            key = "7"
+    if key != "custom":
+        days = int(key)
+        ed = today
+        sd = today - timedelta(days=days - 1)
+    start_dt = reminders.localize(datetime(sd.year, sd.month, sd.day, 0, 0, 0))
+    end_dt = reminders.localize(datetime(ed.year, ed.month, ed.day, 23, 59, 59))
+    if key == "custom":
+        label = f"{sd.strftime('%b %-d, %Y')} – {ed.strftime('%b %-d, %Y')}"
+    else:
+        label = f"Last {key} days vs previous {key}"
+    return key, sd.isoformat(), ed.isoformat(), start_dt, end_dt, label
+
+
 @app.get("/social", response_class=HTMLResponse)
-def social(request: Request, debug: int = 0):
+def social(request: Request, debug: int = 0, range: str = "7", start: str = "", end: str = ""):
     user, resp = _guard(request, "view_social")
     if resp:
         return resp
-    # Diagnostic dump (super admin only) — used to confirm GHL's exact response
-    # shapes so the metrics can be mapped precisely on first connect.
+    range_key, r_start, r_end, start_dt, end_dt, label = _resolve_social_range(range, start, end)
+
+    # Diagnostic dump (super admin only) — confirm GHL's response shapes and
+    # whether the statistics endpoint honored the date range.
     if debug and config.can(user["role"], "manage_settings"):
         import json
         from fastapi.responses import PlainTextResponse
         if not config.ghl_social_enabled():
             return PlainTextResponse("GHL not configured (set GHL_API_TOKEN and GHL_LOCATIONS).")
         try:
-            return PlainTextResponse(json.dumps(ghl.raw_debug(), indent=2, default=str))
+            return PlainTextResponse(json.dumps(ghl.raw_debug(start=start_dt, end=end_dt), indent=2, default=str))
         except Exception as exc:  # noqa: BLE001
             return PlainTextResponse(f"ERROR: {exc}", status_code=500)
+
     data = None
     error = None
     if config.ghl_social_enabled():
         try:
-            data = ghl.social_overview()
+            data = ghl.social_overview(start=start_dt, end=end_dt, window_label=label)
         except Exception as exc:  # noqa: BLE001
             error = str(exc)
     return templates.TemplateResponse(
@@ -249,6 +277,9 @@ def social(request: Request, debug: int = 0):
             social=data,
             social_error=error,
             social_enabled=config.ghl_social_enabled(),
+            range_key=range_key,
+            range_start=r_start,
+            range_end=r_end,
         ),
     )
 
