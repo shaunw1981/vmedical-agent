@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Valley Medical — Appointment Reminders",
+  "version": "1.0.0",
+  "description": "Look up a client (or add a new one) and schedule an appointment reminder in the Valley Medical dashboard.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Appointment Reminders"
+  },
+  "icons": {
+    "16": "icon-16.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["http://*/*", "https://*/*"]
+}

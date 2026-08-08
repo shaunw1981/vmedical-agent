@@ -23,6 +23,7 @@ from fastapi.responses import (
     JSONResponse,
     RedirectResponse,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -39,7 +40,16 @@ import reminders
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.1.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.2.0")
+# Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
+# Only extension origins get CORS; browser session routes are unaffected.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"chrome-extension://.*",
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
+)
 app.add_middleware(SessionMiddleware, secret_key=config.SESSION_SECRET)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -447,13 +457,16 @@ async def api_reminders_create(request: Request):
         body = await request.json()
     except Exception:  # noqa: BLE001
         return JSONResponse({"error": "expected JSON"}, status_code=400)
+    # Attribute to the signed-in staffer when the extension sends it; otherwise
+    # fall back to the authorizing actor (session email, or "api-key").
+    staff = (body.get("staff") or "").strip()
     result = reminders.schedule(
         name=body.get("contact_name") or body.get("name") or "",
         appt_at=body.get("appt_at") or "",
         type_key=body.get("type_key") or "",
         email=body.get("email") or "",
         phone=body.get("phone") or "",
-        created_by=actor,
+        created_by=staff or actor,
     )
     return JSONResponse(result, status_code=200 if result["ok"] else 400)
 

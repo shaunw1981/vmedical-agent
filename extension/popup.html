@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="hdr">
+    <div class="brand">
+      <img src="icon-48.png" alt="" class="brand-mark">
+      <span>Appointment Reminders</span>
+    </div>
+    <button id="logout" class="link" hidden>Log out</button>
+  </header>
+
+  <!-- ===== Login ===== -->
+  <section id="view-login" class="view" hidden>
+    <p class="lead">Sign in to the Valley Medical dashboard to schedule reminders.</p>
+    <label class="fld">Dashboard address
+      <input id="cfg-url" type="url" placeholder="https://spa.example.com" autocomplete="off">
+    </label>
+    <label class="fld">Access key
+      <input id="cfg-key" type="password" placeholder="Your dashboard access key" autocomplete="off">
+    </label>
+    <label class="fld">Your email
+      <input id="cfg-email" type="email" placeholder="you@vmedical.ca" autocomplete="off">
+    </label>
+    <button id="login-btn" class="btn full">Sign in</button>
+    <div id="login-msg" class="msg"></div>
+  </section>
+
+  <!-- ===== Main (search + schedule) ===== -->
+  <section id="view-main" class="view" hidden>
+    <label class="fld">Find a client
+      <input id="search" type="search" placeholder="Search by name, email, or phone…" autocomplete="off">
+    </label>
+    <div id="results" class="results"></div>
+    <button id="add-new" class="link add-new" hidden>+ Add a new client</button>
+
+    <div id="form" class="form" hidden>
+      <div class="form-head">
+        <span id="mode-pill" class="pill"></span>
+        <button id="reset" class="link">Start over</button>
+      </div>
+      <div class="grid2">
+        <label class="fld">First name<input id="f-first" type="text"></label>
+        <label class="fld">Last name<input id="f-last" type="text"></label>
+      </div>
+      <label class="fld">Email<input id="f-email" type="email"></label>
+      <label class="fld">Phone<input id="f-phone" type="tel"></label>
+      <label class="fld">Appointment type
+        <select id="f-type"><option value="">Loading…</option></select>
+      </label>
+      <label class="fld">Appointment date &amp; time
+        <input id="f-when" type="datetime-local">
+      </label>
+      <button id="schedule" class="btn full">Schedule reminder</button>
+    </div>
+    <div id="main-msg" class="msg"></div>
+  </section>
+
+  <!-- ===== Done ===== -->
+  <section id="view-done" class="view center" hidden>
+    <div class="done-check">✓</div>
+    <p id="done-msg" class="done-msg"></p>
+    <button id="again" class="btn full">Schedule another</button>
+  </section>
+
+  <script src="popup.js"></script>
+</body>
+</html>
