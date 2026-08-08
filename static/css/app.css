@@ -350,12 +350,14 @@ select, input { padding:.4rem .55rem; border:1px solid var(--line); border-radiu
 }
 
 /* ---- Clients: search results, record detail ---------------------------- */
-.search-results { margin-top:.6rem; display:flex; flex-direction:column; gap:.25rem; }
-.sr-item { display:flex; flex-direction:column; gap:.1rem; padding:.55rem .7rem; border-radius:var(--radius-sm);
-  text-decoration:none; color:var(--ink); border:1px solid var(--line); }
+.search-results { margin-top:.6rem; display:flex; flex-direction:column; gap:.5rem; }
+.sr-item { display:flex; flex-direction:column; gap:.25rem; padding:.7rem .85rem; border-radius:var(--radius-sm);
+  text-decoration:none; color:var(--ink); border:1px solid var(--line); background:var(--card); }
 .sr-item:hover { background:var(--brand-tint); border-color:var(--brand-tint-2); }
-.sr-name { font-weight:600; font-size:.92rem; }
-.sr-sub { font-size:.8rem; color:var(--muted); }
+.sr-line { display:grid; grid-template-columns:60px 1fr; gap:.6rem; align-items:baseline; }
+.sr-key { color:var(--muted); font-size:.78rem; font-weight:600; text-transform:uppercase; letter-spacing:.03em; }
+.sr-val { font-size:.93rem; color:var(--ink); word-break:break-word; }
+.sr-line:first-child .sr-val { font-weight:600; }
 .sr-empty { padding:.5rem .2rem; color:var(--muted); font-size:.88rem; }
 
 .client-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.1rem; align-items:start; }

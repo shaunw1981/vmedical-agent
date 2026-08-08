@@ -59,21 +59,29 @@
       clearTimeout(t);
       if (q.length < 2) { out.innerHTML = ''; return; }
       t = setTimeout(function () {
+        out.innerHTML = '<div class="sr-empty">Searching…</div>';
         fetch('/api/contacts/search?q=' + encodeURIComponent(q))
           .then(function (r) { return r.json(); })
           .then(function (d) {
             var rows = (d.contacts || []);
+            out.innerHTML = '';
             if (!rows.length) { out.innerHTML = '<div class="sr-empty">No matches.</div>'; return; }
-            out.innerHTML = rows.map(function (c) {
-              var sub = [c.email, c.phone].filter(Boolean).join(' · ');
-              return '<a class="sr-item" href="/clients/' + encodeURIComponent(c.id) + '">' +
-                     '<span class="sr-name"></span><span class="sr-sub"></span></a>';
-            }).join('');
-            // Fill text safely (avoid HTML injection from contact fields).
-            var items = out.querySelectorAll('.sr-item');
-            rows.forEach(function (c, i) {
-              items[i].querySelector('.sr-name').textContent = c.name || '(no name)';
-              items[i].querySelector('.sr-sub').textContent = [c.email, c.phone].filter(Boolean).join(' · ');
+            // Build with DOM + textContent so contact fields can't inject HTML.
+            rows.forEach(function (c) {
+              var a = document.createElement('a');
+              a.className = 'sr-item';
+              a.href = '/clients/' + encodeURIComponent(c.id);
+              function line(key, val) {
+                if (!val) return;
+                var row = document.createElement('div'); row.className = 'sr-line';
+                var k = document.createElement('span'); k.className = 'sr-key'; k.textContent = key;
+                var v = document.createElement('span'); v.className = 'sr-val'; v.textContent = val;
+                row.appendChild(k); row.appendChild(v); a.appendChild(row);
+              }
+              line('Name', c.name || '(no name)');
+              line('Phone', c.phone);
+              line('Email', c.email);
+              out.appendChild(a);
             });
           })
           .catch(function () { out.innerHTML = '<div class="sr-empty">Search failed.</div>'; });

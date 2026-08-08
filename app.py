@@ -39,7 +39,7 @@ import reminders
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.0.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.1.0")
 app.add_middleware(SessionMiddleware, secret_key=config.SESSION_SECRET)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
