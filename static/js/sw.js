@@ -5,7 +5,7 @@
    device — so navigations are network-first and fall back to /offline.
 
    Bump CACHE on every release so old shells are purged. */
-const CACHE = 'vm-shell-v1';
+const CACHE = 'vm-shell-v2';
 
 const SHELL = [
   '/static/css/app.css',
@@ -45,16 +45,16 @@ self.addEventListener('fetch', (event) => {
   const BYPASS = ['/auth', '/login', '/logout', '/webhook', '/sw.js'];
   if (BYPASS.some((p) => url.pathname === p || url.pathname.startsWith(p + '/'))) return;
 
-  // Static assets: cache-first (they're versioned via ?v=ASSET_VER).
+  // Static assets: network-first so CSS/JS changes always reach the user when
+  // online, with the cached copy as an offline fallback. (Cache-first used to
+  // strand old CSS even after a release.)
   if (url.pathname.startsWith('/static/')) {
     event.respondWith(
-      caches.match(req).then((hit) =>
-        hit || fetch(req).then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy));
-          return res;
-        }).catch(() => hit)
-      )
+      fetch(req).then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy));
+        return res;
+      }).catch(() => caches.match(req))
     );
     return;
   }

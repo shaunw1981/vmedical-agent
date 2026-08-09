@@ -392,7 +392,15 @@ select, input { padding:.4rem .55rem; border:1px solid var(--line); border-radiu
 .modal-toggle:checked ~ .modal-overlay { display:flex; }
 .modal-backdrop { position:absolute; inset:0; background:rgba(20,30,25,.45); }
 .modal { position:relative; z-index:1; background:var(--card); border-radius:var(--radius);
-  padding:1.2rem 1.3rem; width:100%; max-width:460px; box-shadow:var(--shadow-lift); }
+  padding:1.2rem 1.3rem; width:100%; max-width:460px; box-shadow:var(--shadow-lift);
+  max-height:calc(100vh - 2rem); overflow-y:auto; }
+.modal.wide { max-width:540px; }
+.modal-form { display:flex; flex-direction:column; gap:1rem; margin-top:.2rem; }
+.modal-form .field-row { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+.modal-form .field-row.three { grid-template-columns:1fr 1fr 1fr; }
+@media (max-width:560px){
+  .modal-form .field-row, .modal-form .field-row.three { grid-template-columns:1fr; }
+}
 .modal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:.7rem; }
 .modal-close { cursor:pointer; font-size:1.5rem; line-height:1; color:var(--muted); padding:0 .3rem; }
 .modal-close:hover { color:var(--ink); }

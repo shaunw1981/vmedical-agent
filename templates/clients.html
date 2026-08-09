@@ -17,12 +17,12 @@
   {% if search_enabled %}
   <div class="modal-overlay">
     <label for="add-contact-modal" class="modal-backdrop" aria-label="Close"></label>
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Add contact">
+    <div class="modal wide" role="dialog" aria-modal="true" aria-label="Add contact">
       <div class="modal-head">
         <h3 style="margin:0">Add a contact</h3>
         <label for="add-contact-modal" class="modal-close" aria-label="Close">×</label>
       </div>
-      <form method="post" action="/clients/new" class="edit-form" style="display:flex">
+      <form method="post" action="/clients/new" class="modal-form">
         <div class="field-row">
           <label class="field"><span>First name</span><input type="text" name="first_name"></label>
           <label class="field"><span>Last name</span><input type="text" name="last_name"></label>
