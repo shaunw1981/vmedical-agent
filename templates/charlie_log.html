@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ charlie_name }}'s send log · Spa Dashboard{% endblock %}
+{% block nav %}charlie{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1 style="margin:0">{{ charlie_name }}'s send log</h1>
+    <a class="btn ghost" href="/charlie">← Back to {{ charlie_name }}</a>
+  </div>
+  <p class="muted" style="margin:.1rem 0 1.1rem">
+    Every email and text {{ charlie_name }} drafted that a team member acted on — sent,
+    cancelled, or failed.</p>
+
+  <div class="card">
+    {% if actions %}
+    <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr>
+        <th>When</th><th>Channel</th><th>To</th><th>Message</th><th>By</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+      {% for a in actions %}
+      <tr class="{{ 'is-cancelled' if a.status == 'cancelled' }}">
+        <td style="white-space:nowrap">{{ fmt_dt(a.sent_at or a.created_at) }}</td>
+        <td><span class="pill">{{ 'Text' if a.channel == 'sms' else 'Email' }}</span></td>
+        <td>{{ a.recipient or '—' }}</td>
+        <td>
+          {% if a.subject %}<div class="who">{{ a.subject }}</div>{% endif %}
+          <div class="meta muted">{{ (a.body or '')[:90] }}{{ '…' if a.body and a.body|length > 90 }}</div>
+        </td>
+        <td class="muted" style="font-size:.82rem">{{ a.user_email }}</td>
+        <td>
+          {% if a.status == 'sent' %}<span class="tag responded">Sent</span>
+          {% elif a.status == 'failed' %}<span class="tag failed" title="{{ a.result or '' }}">Failed</span>
+          {% else %}<span class="tag">Cancelled</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted" style="margin:.2rem 0">Nothing yet — {{ charlie_name }} hasn't sent anything.
+      Drafts appear here once a team member approves, cancels, or a send fails.</p>
+    {% endif %}
+  </div>
+{% endblock %}

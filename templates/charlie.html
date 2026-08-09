@@ -5,6 +5,7 @@
   <div class="page-head">
     <h1 style="margin:0">Ask {{ charlie_name }}</h1>
     <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      {% if charlie_enabled %}<a class="btn ghost" href="/charlie/log">Send log</a>{% endif %}
       {% if charlie_enabled and can(user.role, 'manage_settings') %}
       <form method="post" action="/charlie/setup-brain" style="margin:0">
         <button class="btn ghost" type="submit">{{ 'Refresh brain in Obsidian' if brain_ready else 'Set up brain in Obsidian' }}</button>

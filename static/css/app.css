@@ -477,3 +477,6 @@ select, input { padding:.4rem .55rem; border:1px solid var(--line); border-radiu
 .action-card { border-color:var(--brand-tint-2); box-shadow:var(--shadow-lift); }
 .action-card .modal-form { margin-bottom:.6rem; }
 .action-buttons { display:flex; gap:.7rem; align-items:center; }
+
+/* Send-log status */
+.tag.failed { background:#fee2e2; color:#991b1b; }

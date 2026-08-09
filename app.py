@@ -728,6 +728,20 @@ def charlie_action_send(
     return RedirectResponse("/charlie", status_code=303)
 
 
+@app.get("/charlie/log", response_class=HTMLResponse)
+def charlie_log(request: Request):
+    user, resp = _guard(request, "use_charlie")
+    if resp:
+        return resp
+    return templates.TemplateResponse(
+        "charlie_log.html",
+        _ctx(request, user,
+             charlie_name=config.CHARLIE_NAME,
+             actions=db.list_charlie_actions(),
+             fmt_dt=reminders.format_iso),
+    )
+
+
 @app.post("/charlie/action/{action_id}/cancel")
 def charlie_action_cancel(request: Request, action_id: int):
     user, resp = _guard(request, "use_charlie")

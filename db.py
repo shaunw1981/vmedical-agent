@@ -468,6 +468,16 @@ def latest_pending_action(user_email: str) -> Optional[dict]:
         return dict(row) if row else None
 
 
+def list_charlie_actions(limit: int = 100) -> list[dict]:
+    """Resolved Charlie sends (sent/failed/cancelled), newest first — the send log."""
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM charlie_actions WHERE status != 'pending' "
+            "ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()]
+
+
 def set_charlie_action_status(action_id: int, status: str, result: Optional[str] = None) -> None:
     sent_at = datetime.now().isoformat(timespec="seconds") if status == "sent" else None
     with _connect() as conn:
