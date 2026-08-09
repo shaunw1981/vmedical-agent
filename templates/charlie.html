@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Ask {{ charlie_name }} · Spa Dashboard{% endblock %}
+{% block nav %}charlie{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1 style="margin:0">Ask {{ charlie_name }}</h1>
+    {% if history %}
+    <form method="post" action="/charlie/clear" style="margin:0"
+          onsubmit="return confirm('Clear this conversation?')">
+      <button class="btn ghost" type="submit">Clear chat</button>
+    </form>{% endif %}
+  </div>
+  <p class="muted" style="margin:.1rem 0 1rem">
+    {{ charlie_name }} is your clinic assistant — ask about clients, appointments, the
+    dashboard, or social. Answers draw on your Obsidian knowledge base, so {{ charlie_name }}
+    gets sharper as more notes are added.</p>
+
+  {% if not charlie_enabled %}
+    <div class="card">
+      <h2>Turn {{ charlie_name }} on</h2>
+      <p class="muted" style="margin-top:.2rem">{{ charlie_name }} needs an Anthropic API key.</p>
+      <ol class="setup-steps">
+        <li>Get an API key from <strong>console.anthropic.com</strong>.</li>
+        <li>Add <code>ANTHROPIC_API_KEY=…</code> to <code>.env</code>
+            (optionally <code>CHARLIE_MODEL=claude-sonnet-5</code> for lower cost).</li>
+        <li>Double-click <code>restart.command</code>, then reload this page.</li>
+      </ol>
+    </div>
+  {% else %}
+    {% if not obsidian_ok %}
+    <div class="banner" style="background:#f0f9ff;border-color:#bae6fd;color:#075985">
+      The Obsidian vault isn't connected, so {{ charlie_name }} is answering from general
+      knowledge only. Connect the vault (set <code>OBSIDIAN_VAULT_PATH</code>) to ground answers
+      in your clinic's notes.</div>
+    {% endif %}
+
+    <div class="card chat-card">
+      <div class="chat-thread" id="chat-thread">
+        {% if not history %}
+        <div class="chat-empty muted">
+          Ask {{ charlie_name }} anything — e.g. “What did we last hear from Jane Doe?”,
+          “How do I schedule an EVLT reminder?”, or “Summarize this week's after-hours calls.”
+        </div>
+        {% endif %}
+        {% for m in history %}
+          {% if m.role == 'user' %}
+          <div class="bubble-row you">
+            <div class="bubble you">{{ m.content }}</div>
+          </div>
+          {% else %}
+          <div class="bubble-row charlie">
+            <div class="bubble-avatar" aria-hidden="true">{{ charlie_name[0]|upper }}</div>
+            <div class="bubble charlie">{{ m.content }}</div>
+          </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+
+      {% if error %}
+      <div class="banner" style="margin:.4rem 0 0">⚠️ {{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/charlie/ask" class="chat-form">
+        <textarea name="question" rows="2" required autofocus
+          placeholder="Ask {{ charlie_name }} a question…"></textarea>
+        <button class="btn" type="submit">Ask</button>
+      </form>
+    </div>
+    <p class="note-inline">{{ charlie_name }} can read your knowledge base but can't send
+      emails or texts yet — that's the next step, and it'll always ask before sending.</p>
+  {% endif %}
+
+  <script>
+    // Keep the newest message in view.
+    (function () {
+      var t = document.getElementById('chat-thread');
+      if (t) t.scrollTop = t.scrollHeight;
+    })();
+  </script>
+{% endblock %}

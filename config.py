@@ -133,6 +133,19 @@ def ghl_contacts_enabled() -> bool:
     """True once a token and a reminder location are configured."""
     return bool(GHL_API_TOKEN and reminder_location_id())
 
+
+# --- Charlie (the AI assistant) ----------------------------------------------
+# Charlie answers the team's questions, grounded in the Obsidian knowledge base.
+# Needs an Anthropic API key. The model is configurable — claude-opus-5 is the
+# most capable; set CHARLIE_MODEL=claude-sonnet-5 for lower cost.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+CHARLIE_MODEL = os.environ.get("CHARLIE_MODEL", "claude-opus-5").strip() or "claude-opus-5"
+CHARLIE_NAME = os.environ.get("CHARLIE_NAME", "Charlie").strip() or "Charlie"
+
+
+def charlie_enabled() -> bool:
+    return bool(ANTHROPIC_API_KEY)
+
 # --- Email monitor (reads the "AI Call Recap" emails) ------------------------
 # The app checks this mailbox on a schedule and turns each new recap email into
 # a dashboard message + Obsidian note. Leave IMAP_USER/IMAP_PASSWORD blank to
@@ -171,6 +184,7 @@ DEFAULT_ROLE = "team_member"
 #   view_reminders    - see the scheduled appointment reminders
 #   schedule_reminders- look up a contact and schedule an appointment reminder
 #   view_clients      - open client records (details, notes, appointment history)
+#   use_charlie       - chat with Charlie, the AI assistant
 ROLE_CAPABILITIES = {
     "super_admin": {
         "view_messages",
@@ -181,6 +195,7 @@ ROLE_CAPABILITIES = {
         "view_reminders",
         "schedule_reminders",
         "view_clients",
+        "use_charlie",
     },
     "spa_manager": {
         "view_messages",
@@ -190,6 +205,7 @@ ROLE_CAPABILITIES = {
         "view_reminders",
         "schedule_reminders",
         "view_clients",
+        "use_charlie",
     },
     "team_member": {
         "view_messages",
@@ -197,6 +213,7 @@ ROLE_CAPABILITIES = {
         "view_reminders",
         "schedule_reminders",
         "view_clients",
+        "use_charlie",
     },
 }
 

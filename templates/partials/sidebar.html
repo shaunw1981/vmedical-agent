@@ -22,6 +22,9 @@
   <nav class="nav-group">
     <div class="nav-heading">Summary</div>
     <a class="nav-link {{ 'active' if nav_current == 'home' }}" href="/">Overview</a>
+    {% if can(user.role, 'use_charlie') %}
+    <a class="nav-link {{ 'active' if nav_current == 'charlie' }}" href="/charlie">Ask Charlie</a>
+    {% endif %}
     {% if can(user.role, 'view_messages') %}
     <a class="nav-link {{ 'active' if nav_current == 'messages' }}" href="/messages">
       Messages{% if new_count %}<span class="badge">{{ new_count }}</span>{% endif %}</a>

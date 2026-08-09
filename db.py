@@ -69,6 +69,14 @@ def init_db() -> None:
                 updated_at  TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS charlie_messages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at  TEXT NOT NULL,
+                user_email  TEXT NOT NULL,
+                role        TEXT NOT NULL,   -- 'user' or 'charlie'
+                content     TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS appointments (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at     TEXT NOT NULL,
@@ -388,6 +396,33 @@ def list_client_summaries() -> list[dict]:
                 g["last_appt"] = at
     return sorted(groups.values(),
                   key=lambda g: g["next_appt"] or g["last_appt"] or "", reverse=True)
+
+
+# --- Charlie chat history -----------------------------------------------------
+def add_charlie_message(user_email: str, role: str, content: str) -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO charlie_messages (created_at, user_email, role, content) "
+            "VALUES (?, ?, ?, ?)",
+            (datetime.now().isoformat(timespec="seconds"), user_email.lower(), role, content),
+        )
+        return int(cur.lastrowid)
+
+
+def list_charlie_messages(user_email: str, limit: int = 40) -> list[dict]:
+    """This user's most recent Charlie turns, oldest-first for display."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM charlie_messages WHERE user_email = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (user_email.lower(), limit),
+        ).fetchall()
+    return [dict(r) for r in reversed(rows)]
+
+
+def clear_charlie_messages(user_email: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM charlie_messages WHERE user_email = ?", (user_email.lower(),))
 
 
 def list_messages_for_phone(phone: str) -> list[dict]:

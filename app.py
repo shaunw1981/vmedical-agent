@@ -29,6 +29,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 import auth
+import charlie
 import charts
 import config
 import db
@@ -40,7 +41,7 @@ import reminders
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.3.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.4.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -625,6 +626,53 @@ def client_add_note(request: Request, contact_id: str, body: str = Form(...)):
         except Exception as exc:  # noqa: BLE001
             request.session["client_flash"] = {"ok": False, "msg": f"Couldn't add note: {exc}"}
     return RedirectResponse(f"/clients/{contact_id}", status_code=303)
+
+
+# --- Ask Charlie (AI assistant) ----------------------------------------------
+@app.get("/charlie", response_class=HTMLResponse)
+def charlie_page(request: Request, debug: int = 0):
+    user, resp = _guard(request, "use_charlie")
+    if resp:
+        return resp
+    if debug and config.can(user["role"], "manage_settings"):
+        import json
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(json.dumps(charlie.debug(), indent=2, default=str))
+    return templates.TemplateResponse(
+        "charlie.html",
+        _ctx(request, user,
+             charlie_name=config.CHARLIE_NAME,
+             charlie_enabled=charlie.enabled(),
+             obsidian_ok=obsidian.is_configured(),
+             history=db.list_charlie_messages(user["email"]),
+             error=request.session.pop("charlie_error", None)),
+    )
+
+
+@app.post("/charlie/ask")
+def charlie_ask(request: Request, question: str = Form(...)):
+    user, resp = _guard(request, "use_charlie")
+    if resp:
+        return resp
+    q = (question or "").strip()
+    if q:
+        history = db.list_charlie_messages(user["email"])
+        db.add_charlie_message(user["email"], "user", q)
+        result = charlie.ask(q, history)
+        if result["ok"]:
+            db.add_charlie_message(user["email"], "charlie", result["answer"])
+        else:
+            request.session["charlie_error"] = result["error"]
+    return RedirectResponse("/charlie", status_code=303)
+
+
+@app.post("/charlie/clear")
+def charlie_clear(request: Request):
+    user, resp = _guard(request, "use_charlie")
+    if resp:
+        return resp
+    db.clear_charlie_messages(user["email"])
+    return RedirectResponse("/charlie", status_code=303)
 
 
 # --- Message inbox -----------------------------------------------------------
