@@ -360,6 +360,31 @@ def upsert_contact(location_id: str, name: str, email: Optional[str] = None,
     return {"id": str(cid), "raw": contact}
 
 
+def create_contact(location_id: str, fields: dict) -> dict:
+    """
+    Create a contact from the Add-contact form. Uses POST /contacts/upsert so
+    re-adding someone with the same email/phone updates them instead of making a
+    duplicate. Returns {"id", "new"} where new indicates a fresh contact.
+    """
+    body: dict = {"locationId": location_id}
+    for k in ("firstName", "lastName", "name", "email", "phone",
+              "address1", "city", "state", "postalCode"):
+        v = (fields.get(k) or "").strip()
+        if v:
+            body[k] = v
+    if not body.get("name"):
+        body["name"] = (f"{body.get('firstName','')} {body.get('lastName','')}".strip()
+                        or body.get("email") or body.get("phone") or "Contact")
+    data = _post("/contacts/upsert", body)
+    contact = data.get("contact") if isinstance(data, dict) else None
+    contact = contact if isinstance(contact, dict) else (data if isinstance(data, dict) else {})
+    cid = _first(contact, "id", "_id", "contactId")
+    if not cid:
+        raise RuntimeError(f"GoHighLevel did not return a contact id. Response: {str(data)[:200]}")
+    is_new = data.get("new") if isinstance(data, dict) else None
+    return {"id": str(cid), "new": bool(is_new) if is_new is not None else True}
+
+
 def search_contacts(location_id: str, query: str, limit: int = 10) -> list[dict]:
     """Look up contacts by name/email/phone — used for the lookup + Chrome extension."""
     data = _get("/contacts/", params={"locationId": location_id,

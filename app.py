@@ -489,8 +489,49 @@ def clients_page(request: Request):
         _ctx(request, user,
              clients=db.list_client_summaries(),
              fmt_appt=reminders.format_appt,
-             search_enabled=config.ghl_contacts_enabled()),
+             search_enabled=config.ghl_contacts_enabled(),
+             flash=request.session.pop("clients_flash", None)),
     )
+
+
+@app.post("/clients/new")
+def client_create(
+    request: Request,
+    first_name: str = Form(""),
+    last_name: str = Form(""),
+    email: str = Form(""),
+    phone: str = Form(""),
+    address1: str = Form(""),
+    city: str = Form(""),
+    state: str = Form(""),
+    postal_code: str = Form(""),
+):
+    user, resp = _guard(request, "view_clients")
+    if resp:
+        return resp
+    name = f"{first_name.strip()} {last_name.strip()}".strip()
+    if not name:
+        request.session["clients_flash"] = {"ok": False, "msg": "Enter a first or last name."}
+        return RedirectResponse("/clients", status_code=303)
+    if not email.strip() and not phone.strip():
+        request.session["clients_flash"] = {"ok": False, "msg": "Enter an email or phone number."}
+        return RedirectResponse("/clients", status_code=303)
+    if not config.ghl_contacts_enabled():
+        request.session["clients_flash"] = {"ok": False, "msg": "GoHighLevel isn't connected yet."}
+        return RedirectResponse("/clients", status_code=303)
+    try:
+        result = ghl.create_contact(config.reminder_location_id(), {
+            "firstName": first_name, "lastName": last_name, "email": email, "phone": phone,
+            "address1": address1, "city": city, "state": state, "postalCode": postal_code,
+        })
+        request.session["client_flash"] = {
+            "ok": True,
+            "msg": f"{name} added." if result.get("new") else f"{name} already existed — opened their record.",
+        }
+        return RedirectResponse(f"/clients/{result['id']}", status_code=303)
+    except Exception as exc:  # noqa: BLE001
+        request.session["clients_flash"] = {"ok": False, "msg": f"Couldn't add contact: {exc}"}
+        return RedirectResponse("/clients", status_code=303)
 
 
 @app.get("/clients/{contact_id}", response_class=HTMLResponse)

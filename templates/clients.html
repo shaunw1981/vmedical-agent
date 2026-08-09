@@ -2,11 +2,51 @@
 {% block title %}Clients · Spa Dashboard{% endblock %}
 {% block nav %}clients{% endblock %}
 {% block content %}
+  {% if search_enabled %}<input type="checkbox" id="add-contact-modal" class="visually-hidden modal-toggle">{% endif %}
   <div class="page-head">
     <h1 style="margin:0">Clients</h1>
+    {% if search_enabled %}<label for="add-contact-modal" class="btn">+ Add contact</label>{% endif %}
   </div>
   <p class="muted" style="margin:.1rem 0 1.1rem">
     Open a client to see their contact details, notes, and appointment history.</p>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  {% if search_enabled %}
+  <div class="modal-overlay">
+    <label for="add-contact-modal" class="modal-backdrop" aria-label="Close"></label>
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Add contact">
+      <div class="modal-head">
+        <h3 style="margin:0">Add a contact</h3>
+        <label for="add-contact-modal" class="modal-close" aria-label="Close">×</label>
+      </div>
+      <form method="post" action="/clients/new" class="edit-form" style="display:flex">
+        <div class="field-row">
+          <label class="field"><span>First name</span><input type="text" name="first_name"></label>
+          <label class="field"><span>Last name</span><input type="text" name="last_name"></label>
+        </div>
+        <div class="field-row">
+          <label class="field"><span>Email</span><input type="email" name="email"></label>
+          <label class="field"><span>Phone</span><input type="tel" name="phone"></label>
+        </div>
+        <label class="field"><span>Street address</span><input type="text" name="address1"></label>
+        <div class="field-row three">
+          <label class="field"><span>City</span><input type="text" name="city"></label>
+          <label class="field"><span>Province / State</span><input type="text" name="state"></label>
+          <label class="field"><span>Postal code</span><input type="text" name="postal_code"></label>
+        </div>
+        <div class="modal-actions">
+          <label for="add-contact-modal" class="btn ghost">Cancel</label>
+          <button class="btn" type="submit">Add contact</button>
+        </div>
+        <p class="muted" style="font-size:.78rem;margin:.1rem 0 0">A first or last name and an
+          email or phone are required.</p>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 
   {% if search_enabled %}
   <div class="card">
