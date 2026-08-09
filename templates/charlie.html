@@ -4,16 +4,26 @@
 {% block content %}
   <div class="page-head">
     <h1 style="margin:0">Ask {{ charlie_name }}</h1>
-    {% if history %}
-    <form method="post" action="/charlie/clear" style="margin:0"
-          onsubmit="return confirm('Clear this conversation?')">
-      <button class="btn ghost" type="submit">Clear chat</button>
-    </form>{% endif %}
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      {% if charlie_enabled and can(user.role, 'manage_settings') %}
+      <form method="post" action="/charlie/setup-brain" style="margin:0">
+        <button class="btn ghost" type="submit">{{ 'Refresh brain in Obsidian' if brain_ready else 'Set up brain in Obsidian' }}</button>
+      </form>{% endif %}
+      {% if history %}
+      <form method="post" action="/charlie/clear" style="margin:0"
+            onsubmit="return confirm('Clear this conversation?')">
+        <button class="btn ghost" type="submit">Clear chat</button>
+      </form>{% endif %}
+    </div>
   </div>
   <p class="muted" style="margin:.1rem 0 1rem">
     {{ charlie_name }} is your clinic assistant — ask about clients, appointments, the
-    dashboard, or social. Answers draw on your Obsidian knowledge base, so {{ charlie_name }}
-    gets sharper as more notes are added.</p>
+    dashboard, or social. {{ charlie_name }}'s brain lives in your Obsidian vault
+    (the <code>Charlie/</code> folder), so it gets sharper as you add notes there.</p>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
 
   {% if not charlie_enabled %}
     <div class="card">
@@ -60,10 +70,10 @@
       <div class="banner" style="margin:.4rem 0 0">⚠️ {{ error }}</div>
       {% endif %}
 
-      <form method="post" action="/charlie/ask" class="chat-form">
-        <textarea name="question" rows="2" required autofocus
+      <form method="post" action="/charlie/ask" class="chat-form" id="chat-form">
+        <textarea name="question" id="chat-input" rows="2" required autofocus
           placeholder="Ask {{ charlie_name }} a question…"></textarea>
-        <button class="btn" type="submit">Ask</button>
+        <button class="btn" type="submit" id="chat-send">Ask</button>
       </form>
     </div>
     <p class="note-inline">{{ charlie_name }} can read your knowledge base but can't send
@@ -71,10 +81,38 @@
   {% endif %}
 
   <script>
-    // Keep the newest message in view.
     (function () {
-      var t = document.getElementById('chat-thread');
-      if (t) t.scrollTop = t.scrollHeight;
+      var thread = document.getElementById('chat-thread');
+      if (thread) thread.scrollTop = thread.scrollHeight;  // newest in view
+
+      var form = document.getElementById('chat-form');
+      if (!form) return;
+      var input = document.getElementById('chat-input');
+      var sendBtn = document.getElementById('chat-send');
+      var initial = "{{ charlie_name }}".charAt(0).toUpperCase();
+
+      form.addEventListener('submit', function () {
+        var text = (input.value || '').trim();
+        if (!text) return;  // let the browser's required-validation handle it
+        // Optimistic echo of the question.
+        var you = document.createElement('div');
+        you.className = 'bubble-row you';
+        var youB = document.createElement('div');
+        youB.className = 'bubble you';
+        youB.textContent = text;
+        you.appendChild(youB);
+        thread.appendChild(you);
+        // Charlie "typing…" bubble with animated dots.
+        var row = document.createElement('div');
+        row.className = 'bubble-row charlie';
+        row.innerHTML = '<div class="bubble-avatar" aria-hidden="true">' + initial + '</div>' +
+          '<div class="bubble charlie typing" aria-label="' + "{{ charlie_name }}" +
+          ' is typing"><span></span><span></span><span></span></div>';
+        thread.appendChild(row);
+        thread.scrollTop = thread.scrollHeight;
+        // Disable the controls after submission proceeds.
+        setTimeout(function () { sendBtn.disabled = true; sendBtn.textContent = 'Asking…'; input.disabled = true; }, 0);
+      });
     })();
   </script>
 {% endblock %}

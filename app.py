@@ -644,9 +644,27 @@ def charlie_page(request: Request, debug: int = 0):
              charlie_name=config.CHARLIE_NAME,
              charlie_enabled=charlie.enabled(),
              obsidian_ok=obsidian.is_configured(),
+             brain_ready=charlie.brain_ready(),
              history=db.list_charlie_messages(user["email"]),
-             error=request.session.pop("charlie_error", None)),
+             error=request.session.pop("charlie_error", None),
+             flash=request.session.pop("charlie_flash", None)),
     )
+
+
+@app.post("/charlie/setup-brain")
+def charlie_setup_brain(request: Request):
+    user, resp = _guard(request, "manage_settings")
+    if resp:
+        return resp
+    result = charlie.setup_brain()
+    if result["ok"]:
+        made = result["created"]
+        msg = (f"Charlie's brain is ready in Obsidian at {result['brain']}. "
+               + (f"Created: {', '.join(made)}." if made else "Everything was already in place."))
+        request.session["charlie_flash"] = {"ok": True, "msg": msg}
+    else:
+        request.session["charlie_flash"] = {"ok": False, "msg": result["error"]}
+    return RedirectResponse("/charlie", status_code=303)
 
 
 @app.post("/charlie/ask")
