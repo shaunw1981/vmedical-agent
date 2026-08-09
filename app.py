@@ -35,6 +35,7 @@ import config
 import db
 import email_monitor
 import ghl
+import mailer
 import obsidian
 import reminders
 
@@ -646,6 +647,7 @@ def charlie_page(request: Request, debug: int = 0):
              obsidian_ok=obsidian.is_configured(),
              brain_ready=charlie.brain_ready(),
              history=db.list_charlie_messages(user["email"]),
+             pending_action=db.latest_pending_action(user["email"]),
              error=request.session.pop("charlie_error", None),
              flash=request.session.pop("charlie_flash", None)),
     )
@@ -679,8 +681,62 @@ def charlie_ask(request: Request, question: str = Form(...)):
         result = charlie.ask(q, history)
         if result["ok"]:
             db.add_charlie_message(user["email"], "charlie", result["answer"])
+            action = result.get("action")
+            if action:
+                db.add_charlie_action(
+                    user["email"], channel=action["channel"], recipient=action["to"],
+                    body=action["body"], subject=action.get("subject"))
         else:
             request.session["charlie_error"] = result["error"]
+    return RedirectResponse("/charlie", status_code=303)
+
+
+@app.post("/charlie/action/{action_id}/send")
+def charlie_action_send(
+    request: Request,
+    action_id: int,
+    recipient: str = Form(...),
+    subject: str = Form(""),
+    body: str = Form(...),
+):
+    user, resp = _guard(request, "use_charlie")
+    if resp:
+        return resp
+    action = db.get_charlie_action(action_id)
+    if not action or action["user_email"] != user["email"].lower() or action["status"] != "pending":
+        return RedirectResponse("/charlie", status_code=303)
+
+    recipient, subject, body = recipient.strip(), subject.strip(), body.strip()
+    try:
+        if not recipient:
+            raise ValueError("Add a recipient before sending.")
+        if action["channel"] == "email":
+            mailer.send_email(recipient, subject, body)
+            note = f"✅ Sent the email to {recipient}."
+        else:  # sms via GHL — resolve the phone to a contact, then send
+            contact_id = action["contact_id"]
+            if not contact_id:
+                contact = ghl.upsert_contact(config.reminder_location_id(), name=recipient, phone=recipient)
+                contact_id = contact["id"]
+            ghl.send_sms(contact_id, body)
+            note = f"✅ Sent the text to {recipient}."
+        db.set_charlie_action_status(action_id, "sent", note)
+        db.add_charlie_message(user["email"], "charlie", note)
+    except Exception as exc:  # noqa: BLE001
+        db.set_charlie_action_status(action_id, "failed", str(exc))
+        request.session["charlie_error"] = f"Couldn't send: {exc}"
+    return RedirectResponse("/charlie", status_code=303)
+
+
+@app.post("/charlie/action/{action_id}/cancel")
+def charlie_action_cancel(request: Request, action_id: int):
+    user, resp = _guard(request, "use_charlie")
+    if resp:
+        return resp
+    action = db.get_charlie_action(action_id)
+    if action and action["user_email"] == user["email"].lower() and action["status"] == "pending":
+        db.set_charlie_action_status(action_id, "cancelled", "Cancelled by team member.")
+        db.add_charlie_message(user["email"], "charlie", "Okay — I won't send that.")
     return RedirectResponse("/charlie", status_code=303)
 
 

@@ -413,6 +413,12 @@ def list_workflows(location_id: str) -> list[dict]:
             if _first(w, "id", "_id")]
 
 
+def send_sms(contact_id: str, message: str) -> dict:
+    """Send an SMS to a contact from the location's GHL number (Conversations API)."""
+    return _post("/conversations/messages",
+                 {"type": "SMS", "contactId": contact_id, "message": message})
+
+
 def add_contact_to_workflow(contact_id: str, workflow_id: str,
                             event_start_time: Optional[str] = None) -> dict:
     """

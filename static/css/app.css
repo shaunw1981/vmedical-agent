@@ -472,3 +472,8 @@ select, input { padding:.4rem .55rem; border:1px solid var(--line); border-radiu
   30% { opacity:1; transform:translateY(-3px); }
 }
 @media (prefers-reduced-motion:reduce){ .bubble.typing span { animation:none; } }
+
+/* ---- Ask Charlie: approve-to-send card --------------------------------- */
+.action-card { border-color:var(--brand-tint-2); box-shadow:var(--shadow-lift); }
+.action-card .modal-form { margin-bottom:.6rem; }
+.action-buttons { display:flex; gap:.7rem; align-items:center; }

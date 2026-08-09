@@ -146,7 +146,27 @@ def _load_persona() -> str:
     return _DEFAULT_PERSONA
 
 
-def _system_prompt(context: str) -> str:
+def _send_paragraph(can_email: bool, can_sms: bool) -> str:
+    channels = []
+    if can_email:
+        channels.append("email (send_email)")
+    if can_sms:
+        channels.append("text/SMS (send_sms)")
+    if not channels:
+        return ("You cannot send emails or texts yet; that capability isn't switched on. "
+                "If asked to send something, say it isn't enabled yet.")
+    return (
+        f"You can propose sending {' and '.join(channels)} — but ONLY when a team member "
+        "explicitly asks you to send/email/text someone. Use the matching tool to draft "
+        "the message in your warm Charlie voice. IMPORTANT: calling a send tool does NOT "
+        "send anything — it creates a draft that a team member must review and approve "
+        "first. Never claim you have sent a message; say you've drafted it for approval. "
+        "Include the recipient if you know it from context or the notes; otherwise leave "
+        "it blank and the team member will fill it in."
+    )
+
+
+def _system_prompt(context: str, can_email: bool = False, can_sms: bool = False) -> str:
     persona = _load_persona()
     kb = context or "(No matching notes were found in the knowledge base for this question.)"
     return (
@@ -161,11 +181,49 @@ def _system_prompt(context: str) -> str:
         "they're relevant, and mention which note an answer came from. If the notes "
         "don't cover it, answer from what you know and say plainly when you're unsure "
         "— never invent client details.\n\n"
-        "You cannot send emails or texts yet; that capability is coming. If asked to "
-        "send something, say you'll be able to once it's enabled.\n\n"
+        f"{_send_paragraph(can_email, can_sms)}\n\n"
         "## KNOWLEDGE BASE (clinic notes)\n"
         f"{kb}"
     )
+
+
+def _send_tools(can_email: bool, can_sms: bool) -> list[dict]:
+    tools: list[dict] = []
+    if can_email:
+        tools.append({
+            "name": "send_email",
+            "description": (
+                "Draft an email from the clinic's assistant mailbox for a team member to "
+                "review and approve. Call ONLY when a team member explicitly asks you to "
+                "email someone. Does NOT send — a human approves first."),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string", "description": "Recipient email address (blank if unknown)."},
+                    "subject": {"type": "string", "description": "Email subject line."},
+                    "body": {"type": "string", "description": "Email body in Charlie's warm voice."},
+                },
+                "required": ["body"],
+            },
+        })
+    if can_sms:
+        tools.append({
+            "name": "send_sms",
+            "description": (
+                "Draft a text message (SMS) from the clinic's phone number for a team "
+                "member to review and approve. Call ONLY when a team member explicitly "
+                "asks you to text someone. Keep it short. Does NOT send — a human "
+                "approves first."),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string", "description": "Recipient phone number (blank if unknown)."},
+                    "body": {"type": "string", "description": "The text message (keep it concise)."},
+                },
+                "required": ["body"],
+            },
+        })
+    return tools
 
 
 _BRAIN_README = """# Charlie's Brain
@@ -302,6 +360,9 @@ def ask(question: str, history: Optional[list[dict]] = None) -> dict:
 
     hits = retrieve(question)
     context = _build_context(hits, question)
+    can_email = config.email_send_enabled()
+    can_sms = config.ghl_contacts_enabled()
+    tools = _send_tools(can_email, can_sms)
 
     messages: list[dict] = []
     for turn in (history or [])[-10:]:
@@ -313,21 +374,44 @@ def ask(question: str, history: Optional[list[dict]] = None) -> dict:
 
     try:
         client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        resp = client.messages.create(
+        kwargs = dict(
             model=config.CHARLIE_MODEL,
             max_tokens=_MAX_TOKENS,
-            system=_system_prompt(context),
+            system=_system_prompt(context, can_email, can_sms),
             messages=messages,
         )
-        answer = "".join(
-            b.text for b in resp.content if getattr(b, "type", None) == "text"
-        ).strip()
+        if tools:
+            kwargs["tools"] = tools
+        resp = client.messages.create(**kwargs)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"Charlie couldn't answer: {exc}"}
 
-    if not answer:
+    answer_parts, action = [], None
+    for b in resp.content:
+        btype = getattr(b, "type", None)
+        if btype == "text":
+            answer_parts.append(b.text)
+        elif btype == "tool_use" and action is None and getattr(b, "name", "") in ("send_email", "send_sms"):
+            inp = getattr(b, "input", None) or {}
+            if b.name == "send_email":
+                action = {"channel": "email", "to": (inp.get("to") or "").strip(),
+                          "subject": (inp.get("subject") or "").strip(),
+                          "body": (inp.get("body") or "").strip()}
+            else:
+                action = {"channel": "sms", "to": (inp.get("to") or "").strip(),
+                          "subject": "", "body": (inp.get("body") or "").strip()}
+    answer = "".join(answer_parts).strip()
+
+    if action and not action["body"]:
+        action = None  # empty draft — ignore
+    if action and not answer:
+        kind = "text" if action["channel"] == "sms" else "email"
+        who = f" to {action['to']}" if action["to"] else ""
+        answer = (f"I've drafted a {kind}{who} — review it below and click "
+                  "Approve to send, or edit it first.")
+    if not answer and not action:
         return {"ok": False, "error": "Charlie returned an empty response — try rephrasing."}
-    return {"ok": True, "answer": answer, "sources": [h["title"] for h in hits]}
+    return {"ok": True, "answer": answer, "sources": [h["title"] for h in hits], "action": action}
 
 
 def debug(sample_query: str = "test") -> dict:

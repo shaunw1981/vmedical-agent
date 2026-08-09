@@ -164,6 +164,17 @@ EMAIL_POLL_SECONDS = int(os.environ.get("EMAIL_POLL_SECONDS", "60") or "60")
 def email_monitor_enabled() -> bool:
     return bool(IMAP_USER and IMAP_PASSWORD)
 
+# --- Outgoing email (Charlie sends from this mailbox) ------------------------
+# Reuses the same Google account + app password as the email monitor above, so
+# no extra credential is needed. Charlie only sends after a human approves.
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com").strip() or "smtp.gmail.com"
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587") or "587")
+SMTP_FROM = os.environ.get("SMTP_FROM", "").strip()  # defaults to IMAP_USER
+
+
+def email_send_enabled() -> bool:
+    return bool(IMAP_USER and IMAP_PASSWORD)
+
 # --- Roles and permissions ---------------------------------------------------
 # The three access levels, highest to lowest.
 ROLES = ["super_admin", "spa_manager", "team_member"]

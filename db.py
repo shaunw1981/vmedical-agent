@@ -77,6 +77,20 @@ def init_db() -> None:
                 content     TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS charlie_actions (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at  TEXT NOT NULL,
+                user_email  TEXT NOT NULL,
+                channel     TEXT NOT NULL,   -- 'email' or 'sms'
+                recipient   TEXT,            -- email address or phone
+                subject     TEXT,
+                body        TEXT NOT NULL,
+                contact_id  TEXT,            -- GHL contact id (sms), if known
+                status      TEXT NOT NULL DEFAULT 'pending',  -- pending|sent|cancelled|failed
+                result      TEXT,
+                sent_at     TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS appointments (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at     TEXT NOT NULL,
@@ -423,6 +437,44 @@ def list_charlie_messages(user_email: str, limit: int = 40) -> list[dict]:
 def clear_charlie_messages(user_email: str) -> None:
     with _connect() as conn:
         conn.execute("DELETE FROM charlie_messages WHERE user_email = ?", (user_email.lower(),))
+
+
+def add_charlie_action(user_email: str, channel: str, recipient: str, body: str,
+                       subject: Optional[str] = None, contact_id: Optional[str] = None) -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO charlie_actions "
+            "(created_at, user_email, channel, recipient, subject, body, contact_id, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
+            (datetime.now().isoformat(timespec="seconds"), user_email.lower(),
+             channel, recipient, subject, body, contact_id),
+        )
+        return int(cur.lastrowid)
+
+
+def get_charlie_action(action_id: int) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM charlie_actions WHERE id = ?", (action_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def latest_pending_action(user_email: str) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM charlie_actions WHERE user_email = ? AND status = 'pending' "
+            "ORDER BY id DESC LIMIT 1",
+            (user_email.lower(),),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def set_charlie_action_status(action_id: int, status: str, result: Optional[str] = None) -> None:
+    sent_at = datetime.now().isoformat(timespec="seconds") if status == "sent" else None
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE charlie_actions SET status = ?, result = ?, sent_at = ? WHERE id = ?",
+            (status, result, sent_at, action_id),
+        )
 
 
 def list_messages_for_phone(phone: str) -> list[dict]:

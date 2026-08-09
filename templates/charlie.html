@@ -76,8 +76,42 @@
         <button class="btn" type="submit" id="chat-send">Ask</button>
       </form>
     </div>
-    <p class="note-inline">{{ charlie_name }} can read your knowledge base but can't send
-      emails or texts yet — that's the next step, and it'll always ask before sending.</p>
+
+    {% if pending_action %}
+    <div class="card action-card">
+      <h2 style="margin-bottom:.2rem">
+        Review this {{ 'text' if pending_action.channel == 'sms' else 'email' }} before it's sent
+      </h2>
+      <p class="muted" style="margin:.1rem 0 .8rem;font-size:.85rem">
+        {{ charlie_name }} drafted this — nothing is sent until you click <strong>Approve &amp; send</strong>.
+        Edit anything first.</p>
+      <form method="post" action="/charlie/action/{{ pending_action.id }}/send" class="modal-form">
+        <label class="field">
+          <span>{{ 'Phone number' if pending_action.channel == 'sms' else 'To (email)' }}</span>
+          <input type="text" name="recipient" value="{{ pending_action.recipient or '' }}"
+                 placeholder="{{ '(902) 555-0123' if pending_action.channel == 'sms' else 'name@example.com' }}" required>
+        </label>
+        {% if pending_action.channel == 'email' %}
+        <label class="field"><span>Subject</span>
+          <input type="text" name="subject" value="{{ pending_action.subject or '' }}"></label>
+        {% else %}
+        <input type="hidden" name="subject" value="">
+        {% endif %}
+        <label class="field"><span>Message</span>
+          <textarea name="body" rows="{{ 3 if pending_action.channel == 'sms' else 6 }}" required>{{ pending_action.body }}</textarea>
+        </label>
+        <div class="action-buttons">
+          <button class="btn" type="submit">Approve &amp; send</button>
+        </div>
+      </form>
+      <form method="post" action="/charlie/action/{{ pending_action.id }}/cancel" style="margin:0">
+        <button class="btn ghost" type="submit">Cancel</button>
+      </form>
+    </div>
+    {% endif %}
+
+    <p class="note-inline">{{ charlie_name }} can draft emails and texts, but they're only
+      sent after a team member reviews and approves them — {{ charlie_name }} never sends on its own.</p>
   {% endif %}
 
   <script>
