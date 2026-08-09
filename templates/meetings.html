@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}Meetings · Spa Dashboard{% endblock %}
+{% block nav %}meetings{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1 style="margin:0">Meetings</h1>
+    {% if can_manage and granola_ok %}
+    <form method="post" action="/meetings/sync" style="margin:0">
+      <button class="btn" type="submit">Sync from Granola</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="muted" style="margin:.1rem 0 1.1rem">
+    Meeting notes captured by Granola. Confirm which client each consult belongs to —
+    it files the note and transcript to their record so Charlie can reference it.</p>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  {% if not granola_ok %}
+  <div class="card">
+    <h2>Connect Granola</h2>
+    <p class="muted" style="margin-top:.2rem">To pull meeting notes, add a Granola workspace
+      API key.</p>
+    <ol class="setup-steps">
+      <li>In the Granola desktop app, create a workspace API key (starts with <code>grn_</code>).</li>
+      <li>Add <code>GRANOLA_API_KEY=…</code> to <code>.env</code>.</li>
+      <li>Make sure your two Granola folders are named to match
+          <code>GRANOLA_CLIENT_FOLDERS</code> and <code>GRANOLA_TEAM_FOLDERS</code>
+          (defaults: “Client Consults” and “Team Meeting”).</li>
+      <li>Double-click <code>restart.command</code>, reload, then click
+          <strong>Sync from Granola</strong>.</li>
+    </ol>
+  </div>
+  {% else %}
+
+  <input type="radio" name="mtab" id="tab-consults" class="tab-radio" checked>
+  <input type="radio" name="mtab" id="tab-team" class="tab-radio">
+  <div class="tabs">
+    <label for="tab-consults" class="tab">
+      Client consults{% if pending %} <span class="badge">{{ pending|length }}</span>{% endif %}</label>
+    <label for="tab-team" class="tab">Team meetings</label>
+  </div>
+
+  {# ---- Client consults ---- #}
+  <div class="tab-panel panel-consults">
+    <div class="card">
+      <h2 style="margin-bottom:.6rem">Waiting to be confirmed</h2>
+      {% if pending %}
+        {% for m in pending %}
+        <div class="mtg-item">
+          <div class="mtg-head">
+            <div>
+              <div class="who">{{ m.title }}</div>
+              <div class="meta muted">
+                {% if m.meeting_date %}{{ fmt_dt(m.meeting_date) }}{% endif %}
+                {% if m.folder %} · {{ m.folder }}{% endif %}
+              </div>
+            </div>
+            {% if can_manage %}
+            <div class="mtg-actions">
+              <label for="confirm-modal-{{ m.id }}" class="btn">Confirm client</label>
+              <form method="post" action="/meetings/{{ m.id }}/dismiss" style="margin:0"
+                    onsubmit="return confirm('Dismiss this consult from the queue?')">
+                <button class="btn ghost" type="submit">Dismiss</button>
+              </form>
+            </div>
+            {% endif %}
+          </div>
+          {% if m.attendees %}<div class="meta muted">With: {{ m.attendees.replace('\n', ', ') }}</div>{% endif %}
+          {% if m.summary %}
+          <details class="mtg-details"><summary>Summary</summary>
+            <div class="mtg-body">{{ m.summary }}</div></details>
+          {% endif %}
+          {% if m.transcript %}
+          <details class="mtg-details"><summary>Transcript</summary>
+            <div class="mtg-body mtg-transcript">{{ m.transcript }}</div></details>
+          {% endif %}
+        </div>
+
+        {% if can_manage %}
+        <div class="modal-mount">
+        <input type="checkbox" id="confirm-modal-{{ m.id }}" class="visually-hidden modal-toggle">
+        <div class="modal-overlay">
+          <label for="confirm-modal-{{ m.id }}" class="modal-backdrop" aria-label="Close"></label>
+          <div class="modal wide" role="dialog" aria-modal="true" aria-label="Confirm client">
+            <div class="modal-head">
+              <h3 style="margin:0">Which client is this consult for?</h3>
+              <label for="confirm-modal-{{ m.id }}" class="modal-close" aria-label="Close">×</label>
+            </div>
+            <p class="muted" style="margin:.1rem 0 .6rem;font-size:.85rem">
+              “{{ m.title }}” — filing this attaches the note + transcript to the client's
+              record and adds a note in GoHighLevel.</p>
+            <form method="post" action="/meetings/{{ m.id }}/confirm" class="modal-form confirm-form">
+              <input type="hidden" name="contact_id" value="">
+              {% if search_enabled %}
+              <label class="field">
+                <span>Find the client in GoHighLevel</span>
+                <input type="search" class="consult-search" autocomplete="off"
+                       placeholder="Search by name, email, or phone…">
+              </label>
+              <div class="search-results consult-results"></div>
+              <div class="picked muted" style="display:none"></div>
+              <div class="or-divider"><span>or enter their details</span></div>
+              {% endif %}
+              <label class="field"><span>Client name</span>
+                <input type="text" name="name" placeholder="Jane Doe"></label>
+              <div class="field-row">
+                <label class="field"><span>Phone</span><input type="tel" name="phone"></label>
+                <label class="field"><span>Email</span><input type="email" name="email"></label>
+              </div>
+              <div class="modal-actions">
+                <label for="confirm-modal-{{ m.id }}" class="btn ghost">Cancel</label>
+                <button class="btn" type="submit">Confirm &amp; file</button>
+              </div>
+            </form>
+          </div>
+        </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+      {% else %}
+        <p class="muted" style="margin:.2rem 0">The queue is empty.
+          {% if can_manage %}Click <strong>Sync from Granola</strong> to pull recent consults.{% endif %}</p>
+      {% endif %}
+    </div>
+
+    {% if confirmed %}
+    <div class="card">
+      <h2 style="margin-bottom:.6rem">Recently filed</h2>
+      <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Consult</th><th>Client</th><th>When</th><th>Filed by</th></tr></thead>
+        <tbody>
+        {% for m in confirmed %}
+        <tr>
+          <td>{{ m.title }}</td>
+          <td>{% if m.client_contact_id %}
+            <a class="who" href="/clients/{{ m.client_contact_id }}">{{ m.client_name }}</a>
+            {% else %}{{ m.client_name or '—' }}{% endif %}</td>
+          <td class="muted" style="font-size:.85rem">{% if m.meeting_date %}{{ fmt_dt(m.meeting_date) }}{% endif %}</td>
+          <td class="muted" style="font-size:.82rem">{{ m.confirmed_by }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  {# ---- Team meetings ---- #}
+  <div class="tab-panel panel-team">
+    <div class="card">
+      <h2 style="margin-bottom:.6rem">Team &amp; staff meetings</h2>
+      {% if team %}
+        {% for m in team %}
+        <div class="mtg-item">
+          <div class="mtg-head">
+            <div>
+              <div class="who">{{ m.title }}</div>
+              <div class="meta muted">
+                {% if m.meeting_date %}{{ fmt_dt(m.meeting_date) }}{% endif %}
+                {% if m.obsidian_file %} · <span class="tag responded">Filed to vault</span>{% endif %}
+              </div>
+            </div>
+          </div>
+          {% if m.attendees %}<div class="meta muted">With: {{ m.attendees.replace('\n', ', ') }}</div>{% endif %}
+          {% if m.summary %}
+          <details class="mtg-details"><summary>Summary</summary>
+            <div class="mtg-body">{{ m.summary }}</div></details>
+          {% endif %}
+          {% if m.transcript %}
+          <details class="mtg-details"><summary>Transcript</summary>
+            <div class="mtg-body mtg-transcript">{{ m.transcript }}</div></details>
+          {% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="muted" style="margin:.2rem 0">No team meetings yet.
+          {% if can_manage %}They file here automatically when you sync.{% endif %}</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if search_enabled %}
+  <script>
+  (function () {
+    document.querySelectorAll('.confirm-form').forEach(function (form) {
+      var box = form.querySelector('.consult-search');
+      var out = form.querySelector('.consult-results');
+      var cid = form.querySelector('input[name=contact_id]');
+      var nm = form.querySelector('input[name=name]');
+      var ph = form.querySelector('input[name=phone]');
+      var em = form.querySelector('input[name=email]');
+      var picked = form.querySelector('.picked');
+      if (!box) return;
+      var t = null;
+      box.addEventListener('input', function () {
+        var q = box.value.trim();
+        clearTimeout(t);
+        cid.value = '';  // typing a new search clears any prior pick
+        if (picked) picked.style.display = 'none';
+        if (q.length < 2) { out.innerHTML = ''; return; }
+        t = setTimeout(function () {
+          out.innerHTML = '<div class="sr-empty">Searching…</div>';
+          fetch('/api/contacts/search?q=' + encodeURIComponent(q))
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              var rows = (d.contacts || []);
+              out.innerHTML = '';
+              if (!rows.length) { out.innerHTML = '<div class="sr-empty">No matches.</div>'; return; }
+              rows.forEach(function (c) {
+                var a = document.createElement('button');
+                a.type = 'button';
+                a.className = 'sr-item';
+                function line(key, val) {
+                  if (!val) return;
+                  var row = document.createElement('div'); row.className = 'sr-line';
+                  var k = document.createElement('span'); k.className = 'sr-key'; k.textContent = key;
+                  var v = document.createElement('span'); v.className = 'sr-val'; v.textContent = val;
+                  row.appendChild(k); row.appendChild(v); a.appendChild(row);
+                }
+                line('Name', c.name || '(no name)');
+                line('Phone', c.phone);
+                line('Email', c.email);
+                a.addEventListener('click', function () {
+                  cid.value = c.id || '';
+                  nm.value = c.name || '';
+                  ph.value = c.phone || '';
+                  em.value = c.email || '';
+                  out.innerHTML = '';
+                  box.value = '';
+                  if (picked) {
+                    picked.textContent = '✓ Selected: ' + (c.name || c.email || c.phone || 'contact');
+                    picked.style.display = 'block';
+                  }
+                });
+                out.appendChild(a);
+              });
+            })
+            .catch(function () { out.innerHTML = '<div class="sr-empty">Search failed.</div>'; });
+        }, 250);
+      });
+    });
+  })();
+  </script>
+  {% endif %}
+  {% endif %}
+{% endblock %}

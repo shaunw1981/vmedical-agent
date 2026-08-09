@@ -32,6 +32,10 @@
     {% if can(user.role, 'view_clients') %}
     <a class="nav-link {{ 'active' if nav_current == 'clients' }}" href="/clients">Clients</a>
     {% endif %}
+    {% if can(user.role, 'view_meetings') %}
+    <a class="nav-link {{ 'active' if nav_current == 'meetings' }}" href="/meetings">
+      Meetings{% if meetings_pending %}<span class="badge">{{ meetings_pending }}</span>{% endif %}</a>
+    {% endif %}
     {% if can(user.role, 'view_reminders') %}
     <a class="nav-link {{ 'active' if nav_current == 'reminders' }}" href="/reminders">Reminders</a>
     {% endif %}

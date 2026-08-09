@@ -91,6 +91,29 @@ def init_db() -> None:
                 sent_at     TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS meetings (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                granola_id     TEXT UNIQUE NOT NULL,
+                category       TEXT NOT NULL,   -- 'client' or 'team'
+                title          TEXT,
+                meeting_date   TEXT,            -- ISO from Granola
+                folder         TEXT,
+                attendees      TEXT,            -- newline-separated
+                summary        TEXT,
+                transcript     TEXT,
+                status         TEXT NOT NULL DEFAULT 'pending',
+                                 -- client: pending|confirmed|dismissed ; team: filed
+                captured_at    TEXT NOT NULL,
+                client_contact_id TEXT,         -- GHL contact id, once confirmed
+                client_name    TEXT,
+                client_phone   TEXT,
+                client_email   TEXT,
+                obsidian_file  TEXT,
+                ghl_note_id    TEXT,
+                confirmed_by   TEXT,
+                confirmed_at   TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS appointments (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at     TEXT NOT NULL,
@@ -410,6 +433,104 @@ def list_client_summaries() -> list[dict]:
                 g["last_appt"] = at
     return sorted(groups.values(),
                   key=lambda g: g["next_appt"] or g["last_appt"] or "", reverse=True)
+
+
+# --- Granola meeting notes ---------------------------------------------------
+def upsert_meeting(granola_id: str, category: str, title: str,
+                   meeting_date: Optional[str] = None, folder: Optional[str] = None,
+                   attendees: Optional[str] = None, summary: Optional[str] = None,
+                   transcript: Optional[str] = None) -> dict:
+    """
+    Insert a pulled Granola meeting into the queue if we haven't seen it. Returns
+    {"id", "new"}. Existing rows are refreshed with any newly-available summary/
+    transcript but keep their status (so a confirmed note stays confirmed).
+    """
+    now = datetime.now().isoformat(timespec="seconds")
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM meetings WHERE granola_id = ?", (granola_id,)
+        ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE meetings SET title = ?, meeting_date = ?, folder = ?, "
+                "attendees = ?, "
+                "summary = COALESCE(NULLIF(?, ''), summary), "
+                "transcript = COALESCE(NULLIF(?, ''), transcript) "
+                "WHERE id = ?",
+                (title, meeting_date, folder, attendees, summary or "",
+                 transcript or "", row["id"]),
+            )
+            return {"id": int(row["id"]), "new": False}
+        status = "filed" if category == "team" else "pending"
+        cur = conn.execute(
+            "INSERT INTO meetings (granola_id, category, title, meeting_date, folder, "
+            " attendees, summary, transcript, status, captured_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (granola_id, category, title, meeting_date, folder, attendees,
+             summary, transcript, status, now),
+        )
+        return {"id": int(cur.lastrowid), "new": True}
+
+
+def list_meetings(category: Optional[str] = None, status: Optional[str] = None,
+                  limit: int = 200) -> list[dict]:
+    """Meetings, newest by meeting date first. Optional category/status filter."""
+    query = "SELECT * FROM meetings "
+    clauses, params = [], []
+    if category:
+        clauses.append("category = ?"); params.append(category)
+    if status:
+        clauses.append("status = ?"); params.append(status)
+    if clauses:
+        query += "WHERE " + " AND ".join(clauses) + " "
+    query += "ORDER BY COALESCE(meeting_date, captured_at) DESC, id DESC LIMIT ?"
+    params.append(limit)
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def get_meeting(meeting_id: int) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM meetings WHERE id = ?", (meeting_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def count_pending_meetings() -> int:
+    """Client consults still waiting to be confirmed (for the sidebar badge)."""
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM meetings WHERE category = 'client' AND status = 'pending'"
+        ).fetchone()[0]
+
+
+def confirm_meeting(meeting_id: int, contact_id: str, client_name: str,
+                    confirmed_by: str, client_phone: Optional[str] = None,
+                    client_email: Optional[str] = None,
+                    obsidian_file: Optional[str] = None,
+                    ghl_note_id: Optional[str] = None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE meetings SET status = 'confirmed', client_contact_id = ?, "
+            "client_name = ?, client_phone = ?, client_email = ?, obsidian_file = ?, "
+            "ghl_note_id = ?, confirmed_by = ?, confirmed_at = ? WHERE id = ?",
+            (contact_id, client_name, client_phone, client_email, obsidian_file,
+             ghl_note_id, confirmed_by, datetime.now().isoformat(timespec="seconds"),
+             meeting_id),
+        )
+
+
+def dismiss_meeting(meeting_id: int, by: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE meetings SET status = 'dismissed', confirmed_by = ?, confirmed_at = ? "
+            "WHERE id = ?",
+            (by, datetime.now().isoformat(timespec="seconds"), meeting_id),
+        )
+
+
+def set_meeting_obsidian_file(meeting_id: int, path: str) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE meetings SET obsidian_file = ? WHERE id = ?", (path, meeting_id))
 
 
 # --- Charlie chat history -----------------------------------------------------

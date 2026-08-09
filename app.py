@@ -35,14 +35,16 @@ import config
 import db
 import email_monitor
 import ghl
+import granola
 import mailer
+import meetings as meetings_svc
 import obsidian
 import reminders
 
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.4.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.5.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -111,6 +113,7 @@ def _ctx(request: Request, user: dict, **extra) -> dict:
         "request": request,
         "user": user,
         "new_count": db.count_new_messages(),
+        "meetings_pending": db.count_pending_meetings(),
         "obsidian_ok": obsidian.is_configured(),
     }
     base.update(extra)
@@ -627,6 +630,86 @@ def client_add_note(request: Request, contact_id: str, body: str = Form(...)):
         except Exception as exc:  # noqa: BLE001
             request.session["client_flash"] = {"ok": False, "msg": f"Couldn't add note: {exc}"}
     return RedirectResponse(f"/clients/{contact_id}", status_code=303)
+
+
+# --- Meetings (Granola notes: client consults + team meetings) ---------------
+@app.get("/meetings", response_class=HTMLResponse)
+def meetings_page(request: Request, debug: int = 0):
+    user, resp = _guard(request, "view_meetings")
+    if resp:
+        return resp
+    if debug and config.can(user["role"], "manage_settings"):
+        import json
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(json.dumps(granola.debug(), indent=2, default=str))
+    return templates.TemplateResponse(
+        "meetings.html",
+        _ctx(request, user,
+             granola_ok=config.granola_enabled(),
+             can_manage=config.can(user["role"], "manage_meetings"),
+             search_enabled=config.ghl_contacts_enabled(),
+             pending=db.list_meetings(category="client", status="pending"),
+             confirmed=db.list_meetings(category="client", status="confirmed", limit=50),
+             team=db.list_meetings(category="team", limit=50),
+             fmt_dt=reminders.format_iso,
+             flash=request.session.pop("meetings_flash", None)),
+    )
+
+
+@app.post("/meetings/sync")
+def meetings_sync(request: Request):
+    user, resp = _guard(request, "manage_meetings")
+    if resp:
+        return resp
+    result = meetings_svc.sync()
+    if result["ok"]:
+        msg = (f"Synced Granola — {result['new_client']} new consult(s) in the queue, "
+               f"{result['new_team']} new team meeting(s) filed.")
+        if not result["new_client"] and not result["new_team"]:
+            msg = "Synced Granola — nothing new since last time."
+        for w in result.get("warnings", []):
+            msg += f" ⚠️ {w}"
+        request.session["meetings_flash"] = {"ok": True, "msg": msg}
+    else:
+        request.session["meetings_flash"] = {"ok": False, "msg": result["error"]}
+    return RedirectResponse("/meetings", status_code=303)
+
+
+@app.post("/meetings/{meeting_id}/confirm")
+def meetings_confirm(
+    request: Request,
+    meeting_id: int,
+    contact_id: str = Form(""),
+    name: str = Form(""),
+    phone: str = Form(""),
+    email: str = Form(""),
+):
+    user, resp = _guard(request, "manage_meetings")
+    if resp:
+        return resp
+    result = meetings_svc.confirm(
+        meeting_id, actor=user["email"], contact_id=contact_id,
+        name=name, phone=phone, email=email,
+    )
+    if result["ok"]:
+        msg = (f"Consult filed to {result['client_name']}'s record — note added to "
+               "GoHighLevel and transcript saved for Charlie.")
+        for w in result.get("warnings", []):
+            msg += f" ⚠️ {w}"
+        request.session["meetings_flash"] = {"ok": True, "msg": msg}
+    else:
+        request.session["meetings_flash"] = {"ok": False, "msg": result["error"]}
+    return RedirectResponse("/meetings", status_code=303)
+
+
+@app.post("/meetings/{meeting_id}/dismiss")
+def meetings_dismiss(request: Request, meeting_id: int):
+    user, resp = _guard(request, "manage_meetings")
+    if resp:
+        return resp
+    db.dismiss_meeting(meeting_id, by=user["email"])
+    request.session["meetings_flash"] = {"ok": True, "msg": "Consult dismissed from the queue."}
+    return RedirectResponse("/meetings", status_code=303)
 
 
 # --- Ask Charlie (AI assistant) ----------------------------------------------

@@ -146,6 +146,35 @@ CHARLIE_NAME = os.environ.get("CHARLIE_NAME", "Charlie").strip() or "Charlie"
 def charlie_enabled() -> bool:
     return bool(ANTHROPIC_API_KEY)
 
+# --- Granola meeting notes ---------------------------------------------------
+# Granola records client consults + team meetings and produces an AI summary
+# and transcript for each. We read them through Granola's public API using a
+# workspace API key (starts with "grn_", created in the Granola desktop app).
+# Leave GRANOLA_API_KEY blank to keep the Meetings section in its setup state.
+GRANOLA_API_KEY = os.environ.get("GRANOLA_API_KEY", "").strip()
+GRANOLA_API_BASE = os.environ.get(
+    "GRANOLA_API_BASE", "https://public-api.granola.ai/v1"
+).rstrip("/")
+
+# Which Granola folders map to each section. Notes in a "Client Consults" folder
+# go to the intake queue; notes in a "Team Meeting" folder go to Team meetings.
+# Comma-separated; matching is case-insensitive and forgiving of small variants.
+_client_folders_raw = os.environ.get(
+    "GRANOLA_CLIENT_FOLDERS", "Client Consults,Client Consult,Client Calls,Client Call"
+)
+GRANOLA_CLIENT_FOLDERS = [f.strip() for f in _client_folders_raw.split(",") if f.strip()]
+_team_folders_raw = os.environ.get(
+    "GRANOLA_TEAM_FOLDERS", "Team Meeting,Team Meetings,Staff Meeting,Team/Staff"
+)
+GRANOLA_TEAM_FOLDERS = [f.strip() for f in _team_folders_raw.split(",") if f.strip()]
+
+# How many days back to pull when syncing meetings from Granola.
+GRANOLA_SYNC_DAYS = int(os.environ.get("GRANOLA_SYNC_DAYS", "30") or "30")
+
+
+def granola_enabled() -> bool:
+    return bool(GRANOLA_API_KEY)
+
 # --- Email monitor (reads the "AI Call Recap" emails) ------------------------
 # The app checks this mailbox on a schedule and turns each new recap email into
 # a dashboard message + Obsidian note. Leave IMAP_USER/IMAP_PASSWORD blank to
@@ -196,6 +225,8 @@ DEFAULT_ROLE = "team_member"
 #   schedule_reminders- look up a contact and schedule an appointment reminder
 #   view_clients      - open client records (details, notes, appointment history)
 #   use_charlie       - chat with Charlie, the AI assistant
+#   view_meetings     - see the Granola meeting notes (queue + team meetings)
+#   manage_meetings   - sync Granola, confirm a consult to a client, dismiss
 ROLE_CAPABILITIES = {
     "super_admin": {
         "view_messages",
@@ -207,6 +238,8 @@ ROLE_CAPABILITIES = {
         "schedule_reminders",
         "view_clients",
         "use_charlie",
+        "view_meetings",
+        "manage_meetings",
     },
     "spa_manager": {
         "view_messages",
@@ -217,6 +250,8 @@ ROLE_CAPABILITIES = {
         "schedule_reminders",
         "view_clients",
         "use_charlie",
+        "view_meetings",
+        "manage_meetings",
     },
     "team_member": {
         "view_messages",
@@ -225,6 +260,8 @@ ROLE_CAPABILITIES = {
         "schedule_reminders",
         "view_clients",
         "use_charlie",
+        "view_meetings",
+        "manage_meetings",  # team members confirm which client a consult belongs to
     },
 }
 

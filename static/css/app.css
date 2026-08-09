@@ -480,3 +480,46 @@ select, input { padding:.4rem .55rem; border:1px solid var(--line); border-radiu
 
 /* Send-log status */
 .tag.failed { background:#fee2e2; color:#991b1b; }
+
+/* ---- Meetings (Granola): tabs, queue items, confirm modal -------------- */
+.tab-radio { position:absolute; opacity:0; pointer-events:none; }
+.tabs { display:flex; gap:.4rem; margin-bottom:1rem; border-bottom:1px solid var(--line); }
+.tab { cursor:pointer; padding:.55rem .95rem; font-size:.92rem; font-weight:600;
+  color:var(--muted); border-bottom:2px solid transparent; margin-bottom:-1px;
+  display:inline-flex; align-items:center; gap:.4rem; }
+.tab:hover { color:var(--ink); }
+.tab .badge { background:#e5484d; color:#fff; font-size:.72rem; font-weight:700;
+  border-radius:999px; padding:.02rem .42rem; }
+.tab-panel { display:none; }
+#tab-consults:checked ~ .panel-consults { display:block; }
+#tab-team:checked ~ .panel-team { display:block; }
+#tab-consults:checked ~ .tabs .tab[for="tab-consults"],
+#tab-team:checked ~ .tabs .tab[for="tab-team"] {
+  color:var(--brand-strong); border-bottom-color:var(--brand); }
+
+.mtg-item { padding:.85rem 0; border-bottom:1px solid var(--line); }
+.mtg-item:last-child { border-bottom:0; padding-bottom:.2rem; }
+.mtg-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; }
+.mtg-actions { display:flex; gap:.5rem; align-items:center; flex-shrink:0; }
+.mtg-item .meta { font-size:.82rem; margin-top:.15rem; }
+.mtg-details { margin-top:.55rem; }
+.mtg-details summary { cursor:pointer; font-size:.85rem; font-weight:600;
+  color:var(--brand-strong); }
+.mtg-body { margin-top:.5rem; font-size:.92rem; line-height:1.55; white-space:pre-wrap;
+  word-wrap:break-word; background:var(--brand-tint); border:1px solid var(--brand-tint-2);
+  border-radius:var(--radius-sm); padding:.7rem .85rem; }
+.mtg-transcript { max-height:340px; overflow-y:auto; font-size:.88rem; }
+
+/* Confirm-modal contact picker */
+.modal-mount { }
+button.sr-item { width:100%; text-align:left; font:inherit; cursor:pointer; }
+.picked { font-size:.86rem; font-weight:600; color:var(--brand-strong);
+  background:var(--brand-tint); border-radius:var(--radius-sm); padding:.45rem .6rem; }
+.or-divider { display:flex; align-items:center; gap:.7rem; color:var(--muted);
+  font-size:.8rem; text-transform:uppercase; letter-spacing:.04em; }
+.or-divider::before, .or-divider::after { content:""; flex:1; height:1px; background:var(--line); }
+
+@media (max-width:560px){
+  .mtg-head { flex-direction:column; gap:.5rem; }
+  .mtg-actions { width:100%; }
+}
