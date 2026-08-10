@@ -579,6 +579,8 @@ def client_detail(request: Request, contact_id: str, debug: int = 0):
              ghl_appts=ghl_appts, local_appts=local_appts, calls=calls,
              errors=errors, fmt_appt=reminders.format_appt, fmt_dt=reminders.format_iso,
              ghl_enabled=config.ghl_contacts_enabled(),
+             charlie_text_enabled=(config.charlie_conversations_enabled()
+                                   and config.can(user["role"], "use_inbox")),
              flash=request.session.pop("client_flash", None)),
     )
 
@@ -614,6 +616,32 @@ def client_edit(
         request.session["client_flash"] = {"ok": True, "msg": "Contact details updated."}
     except Exception as exc:  # noqa: BLE001
         request.session["client_flash"] = {"ok": False, "msg": f"Couldn't update contact: {exc}"}
+    return RedirectResponse(f"/clients/{contact_id}", status_code=303)
+
+
+@app.post("/clients/{contact_id}/charlie-text")
+def client_charlie_text(request: Request, contact_id: str, instruction: str = Form(...)):
+    user, resp = _guard(request, "use_inbox")
+    if resp:
+        return resp
+    name = phone = email = None
+    try:
+        c = ghl.get_contact(contact_id)
+        name, phone, email = c.get("name"), c.get("phone"), c.get("email")
+    except Exception as exc:  # noqa: BLE001
+        request.session["client_flash"] = {"ok": False, "msg": f"Couldn't load contact: {exc}"}
+        return RedirectResponse(f"/clients/{contact_id}", status_code=303)
+    result = inbox_svc.start_draft(instruction, actor=user["email"], contact_id=contact_id,
+                                   name=name, phone=phone, email=email)
+    if result["ok"]:
+        msg = (f"{config.CHARLIE_NAME} drafted a text — review and send it in the Inbox."
+               if result["outcome"] == "draft"
+               else f"{config.CHARLIE_NAME} needs a hand with this one — see the Inbox.")
+        for w in result.get("warnings", []):
+            msg += f" ⚠️ {w}"
+        request.session["inbox_flash"] = {"ok": True, "msg": msg}
+        return RedirectResponse("/inbox", status_code=303)
+    request.session["client_flash"] = {"ok": False, "msg": result["error"]}
     return RedirectResponse(f"/clients/{contact_id}", status_code=303)
 
 

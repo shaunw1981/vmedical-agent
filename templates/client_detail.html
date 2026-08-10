@@ -3,10 +3,40 @@
 {% block nav %}clients{% endblock %}
 {% block content %}
   {% set editable = contact and ghl_enabled and not errors.contact %}
+  {% set can_charlie_text = charlie_text_enabled and contact and contact.phone %}
+  {% if can_charlie_text %}<input type="checkbox" id="charlie-text-modal" class="visually-hidden modal-toggle">{% endif %}
   <div class="page-head">
     <h1 style="margin:0">{{ contact.name if contact else 'Client record' }}</h1>
-    <a class="btn ghost" href="/clients">← All clients</a>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      {% if can_charlie_text %}<label for="charlie-text-modal" class="btn">Text with Charlie</label>{% endif %}
+      <a class="btn ghost" href="/clients">← All clients</a>
+    </div>
   </div>
+
+  {% if can_charlie_text %}
+  <div class="modal-overlay">
+    <label for="charlie-text-modal" class="modal-backdrop" aria-label="Close"></label>
+    <div class="modal wide" role="dialog" aria-modal="true" aria-label="Text with Charlie">
+      <div class="modal-head">
+        <h3 style="margin:0">Text with Charlie</h3>
+        <label for="charlie-text-modal" class="modal-close" aria-label="Close">×</label>
+      </div>
+      <p class="muted" style="margin:.1rem 0 .6rem;font-size:.85rem">
+        Tell Charlie what to say to {{ contact.name }} ({{ contact.phone }}). She'll draft the
+        text in her voice and put it in the <strong>Inbox</strong> for you to review and send —
+        nothing goes out until you send it.</p>
+      <form method="post" action="/clients/{{ contact_id }}/charlie-text" class="modal-form">
+        <label class="field"><span>What should Charlie tell them?</span>
+          <textarea name="instruction" rows="3" required
+            placeholder="e.g. Let her know her compression stockings are in and she can pick them up any weekday 9–5."></textarea></label>
+        <div class="modal-actions">
+          <label for="charlie-text-modal" class="btn ghost">Cancel</label>
+          <button class="btn" type="submit">Have Charlie draft it</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 
   {% if flash %}
   <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>

@@ -143,6 +143,30 @@ def take_over(convo_id: int, actor: str) -> dict:
     return {"ok": True}
 
 
+def start_draft(instruction: str, actor: str, contact_id: Optional[str] = None,
+                name: Optional[str] = None, phone: Optional[str] = None,
+                email: Optional[str] = None) -> dict:
+    """
+    Kick off a conversation from a client's record: a team member says what they
+    want to tell the contact, and Charlie drafts the opening text into the Inbox
+    for review (or hands off if she needs clarity). Nothing is sent here.
+    """
+    instruction = (instruction or "").strip()
+    if not instruction:
+        return {"ok": False, "error": "Tell Charlie what to say first."}
+    if not phone:
+        return {"ok": False, "error": "This contact has no phone number to text."}
+    convo = db.get_or_create_convo(phone=phone, contact_id=contact_id,
+                                   contact_name=name, email=email)
+    db.add_inbox_message(convo["id"], "team",
+                         f"Started a text via {config.CHARLIE_NAME}: {instruction}", via="note")
+    result = charlie.converse(name, [{"role": "team", "body": instruction}], "",
+                              direction=instruction)
+    out = _apply_result(db.get_convo(convo["id"]), result)
+    out["convo_id"] = convo["id"]
+    return out
+
+
 def start_from_outreach(phone: Optional[str], body: str, contact_id: Optional[str] = None,
                         name: Optional[str] = None, email: Optional[str] = None) -> Optional[int]:
     """
