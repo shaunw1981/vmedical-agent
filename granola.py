@@ -333,14 +333,43 @@ def get_transcript(note_id: str) -> str:
 
 # --- Normalized fetch (for the intake queue) ---------------------------------
 
-def _target_folders() -> list[tuple[dict, str]]:
-    """Granola folders that map to a section, as (folder, category) pairs."""
-    pairs: list[tuple[dict, str]] = []
-    for f in list_folders():
-        cat = categorize([f.get("name", "")])
-        if cat and f.get("id"):
-            pairs.append((f, cat))
-    return pairs
+def _folder_name_map() -> dict:
+    """folder id → name, so notes that carry only folder ids can be categorized."""
+    out: dict = {}
+    try:
+        for f in list_folders():
+            if f.get("id"):
+                out[str(f["id"])] = f.get("name", "")
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def _note_folder_ids(note: dict) -> list[str]:
+    ids: list[str] = []
+    raw = _first(note, "folders", "folder_ids", "document_lists", "lists",
+                 "list_ids", default=None)
+    if isinstance(raw, list):
+        for x in raw:
+            if isinstance(x, dict):
+                ids.append(str(_first(x, "id", "folder_id", "_id", default="")))
+            else:
+                ids.append(str(x))
+    for k in ("folder_id", "list_id"):
+        v = note.get(k)
+        if v:
+            ids.append(str(v))
+    return [i for i in ids if i]
+
+
+def _note_folder_names(note: dict, id_map: dict) -> list[str]:
+    """Every folder name a note belongs to — inline names plus id→name lookups."""
+    names = list(_note_folders(note))  # inline {name}/folder_name shapes
+    for fid in _note_folder_ids(note):
+        nm = id_map.get(fid)
+        if nm:
+            names.append(nm)
+    return names
 
 
 def _record(note: dict, category: str, folder_name: str,
@@ -368,26 +397,30 @@ def _record(note: dict, category: str, folder_name: str,
 
 def fetch_recent(days: int = 30, with_transcripts: bool = True) -> list[dict]:
     """
-    Recent client-consult + team meetings, normalized for storage. Driven by the
-    Granola folders themselves: each folder that matches a configured name is
-    listed by its id and its notes inherit that folder's category. A note seen in
-    more than one folder is filed once, preferring the client category.
+    Recent client-consult + team meetings, normalized for storage.
+
+    Granola's public /notes endpoint has no folder filter, so we list all
+    accessible notes and categorize each by the folder(s) it belongs to —
+    reading folder names inline, and resolving any bare folder ids through the
+    folder map. Only notes in a configured client/team folder are kept; a note
+    in both is filed once, with the client category winning.
     """
     since = datetime.now(timezone.utc) - timedelta(days=days)
+    id_map = _folder_name_map()
+    notes = list_notes(created_after=since)
     by_id: dict[str, dict] = {}
-    for folder, category in _target_folders():
-        try:
-            notes = list_notes(created_after=since, folder_id=folder["id"])
-        except Exception:  # noqa: BLE001
-            notes = []
-        for n in notes:
-            rec = _record(n, category, folder.get("name", ""), with_transcripts)
-            if not rec:
-                continue
-            prev = by_id.get(rec["granola_id"])
-            # First win, but let a client categorization override a team one.
-            if prev is None or (prev["category"] == "team" and category == "client"):
-                by_id[rec["granola_id"]] = rec
+    for n in notes:
+        names = _note_folder_names(n, id_map)
+        category = categorize(names)
+        if category is None:
+            continue
+        folder_name = next((nm for nm in names if categorize([nm]) == category), "")
+        rec = _record(n, category, folder_name, with_transcripts)
+        if not rec:
+            continue
+        prev = by_id.get(rec["granola_id"])
+        if prev is None or (prev["category"] == "team" and category == "client"):
+            by_id[rec["granola_id"]] = rec
     return list(by_id.values())
 
 
@@ -459,8 +492,6 @@ def debug() -> dict:
     except Exception as exc:  # noqa: BLE001
         out["workspaces_error"] = str(exc)
 
-    client_id = next((f["id"] for f, c in targets if c == "client"),
-                     (targets[0][0]["id"] if targets else None))
     d365 = _iso(datetime.now(timezone.utc) - timedelta(days=365))
     d90 = _iso(datetime.now(timezone.utc) - timedelta(days=90))
     variants = [
@@ -470,12 +501,6 @@ def debug() -> dict:
         ("updated_after_365d", {"page_size": 3, "updated_after": d365}),
         ("created_after_90d", {"page_size": 3, "created_after": d90}),
     ]
-    if client_id:
-        variants += [
-            ("folder_id+created365", {"page_size": 3, "folder_id": client_id, "created_after": d365}),
-            ("folder_ids+created365", {"page_size": 3, "folder_ids": client_id, "created_after": d365}),
-            ("list_id+created365", {"page_size": 3, "list_id": client_id, "created_after": d365}),
-        ]
     results = []
     sample_note = None
     for label, params in variants:
@@ -495,12 +520,12 @@ def debug() -> dict:
         results.append(entry)
     out["notes_variants"] = results
 
-    # Folder detail — some APIs return a folder's notes on the detail endpoint.
-    if client_id:
-        try:
-            out["folder_detail_raw"] = _redact(_get(f"/folders/{client_id}"))
-        except Exception as exc:  # noqa: BLE001
-            out["folder_detail_error"] = str(exc)
+    # When a note appears, show how it categorizes (folder names → client/team).
+    if sample_note:
+        id_map = _folder_name_map()
+        names = _note_folder_names(sample_note, id_map)
+        out["sample_note_folders"] = names
+        out["sample_note_category"] = categorize(names)
 
     # Transcript probe on the first note we found, if any.
     if sample_note:
