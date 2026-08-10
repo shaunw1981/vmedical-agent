@@ -449,45 +449,67 @@ def debug() -> dict:
     out["target_folders"] = [{"id": f["id"], "name": f["name"], "category": c}
                              for f, c in targets]
 
-    # Which query param scopes /notes to a folder? Probe folder_id vs folder.
-    probes = []
-    for f, cat in targets[:4]:
-        entry: dict = {"folder": f.get("name"), "id": f.get("id"), "category": cat}
-        for param in ("folder_id", "folder"):
-            try:
-                d = _get("/notes", params={"page_size": 3, param: f["id"]})
-                page = _notes_page(d)
-                entry[f"{param}_count"] = len(page)
-                if page and "sample_note_keys" not in entry:
-                    entry["sample_note_keys"] = sorted(page[0].keys())
-                    entry["sample_note"] = _redact(page[0])
-            except Exception as exc:  # noqa: BLE001
-                entry[f"{param}_error"] = str(exc)
-        probes.append(entry)
-    out["folder_probes"] = probes
-
-    # Confirm the created_after date format is accepted.
-    since = datetime.now(timezone.utc) - timedelta(days=30)
-    out["created_after_sent"] = _iso(since)
+    # Raw dumps to reveal the real object shapes (folders' fields, workspace).
     try:
-        _get("/notes", params={"page_size": 3, "created_after": _iso(since)})
-        out["created_after_ok"] = True
+        out["folders_raw"] = _redact(_get("/folders"))
     except Exception as exc:  # noqa: BLE001
-        out["created_after_error"] = str(exc)
+        out["folders_raw_error"] = str(exc)
+    try:
+        out["workspaces_raw"] = _redact(_get("/workspaces"))
+    except Exception as exc:  # noqa: BLE001
+        out["workspaces_error"] = str(exc)
 
-    # Transcript probe on the first note we can find.
-    first_id = None
-    for p in probes:
-        sn = p.get("sample_note")
-        if isinstance(sn, dict):
-            first_id = _first(sn, "id", "_id", "document_id")
-            if first_id:
-                break
-    if first_id:
+    client_id = next((f["id"] for f, c in targets if c == "client"),
+                     (targets[0][0]["id"] if targets else None))
+    d365 = _iso(datetime.now(timezone.utc) - timedelta(days=365))
+    d90 = _iso(datetime.now(timezone.utc) - timedelta(days=90))
+    variants = [
+        ("no_params", {}),
+        ("page_size_only", {"page_size": 3}),
+        ("created_after_365d", {"page_size": 3, "created_after": d365}),
+        ("updated_after_365d", {"page_size": 3, "updated_after": d365}),
+        ("created_after_90d", {"page_size": 3, "created_after": d90}),
+    ]
+    if client_id:
+        variants += [
+            ("folder_id+created365", {"page_size": 3, "folder_id": client_id, "created_after": d365}),
+            ("folder_ids+created365", {"page_size": 3, "folder_ids": client_id, "created_after": d365}),
+            ("list_id+created365", {"page_size": 3, "list_id": client_id, "created_after": d365}),
+        ]
+    results = []
+    sample_note = None
+    for label, params in variants:
+        entry = {"variant": label, "params": {k: v for k, v in params.items() if k != "page_size"}}
         try:
-            out["transcript_sample"] = (get_transcript(str(first_id)) or "")[:400]
+            d = _get("/notes", params=params)
+            page = _notes_page(d)
+            entry["count"] = len(page)
+            entry["top_keys"] = sorted(d.keys()) if isinstance(d, dict) else None
+            if page:
+                entry["note_keys"] = sorted(page[0].keys())
+                if sample_note is None:
+                    sample_note = page[0]
+                    out["sample_note"] = _redact(page[0])
         except Exception as exc:  # noqa: BLE001
-            out["transcript_error"] = str(exc)
+            entry["error"] = str(exc)
+        results.append(entry)
+    out["notes_variants"] = results
+
+    # Folder detail — some APIs return a folder's notes on the detail endpoint.
+    if client_id:
+        try:
+            out["folder_detail_raw"] = _redact(_get(f"/folders/{client_id}"))
+        except Exception as exc:  # noqa: BLE001
+            out["folder_detail_error"] = str(exc)
+
+    # Transcript probe on the first note we found, if any.
+    if sample_note:
+        fid = _first(sample_note, "id", "_id", "document_id")
+        if fid:
+            try:
+                out["transcript_sample"] = (get_transcript(str(fid)) or "")[:400]
+            except Exception as exc:  # noqa: BLE001
+                out["transcript_error"] = str(exc)
 
     try:
         parsed = fetch_recent(days=90, with_transcripts=False)
