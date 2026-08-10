@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Inbox · Spa Dashboard{% endblock %}
+{% block nav %}inbox{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1 style="margin:0">Inbox</h1>
+  </div>
+  <p class="muted" style="margin:.1rem 0 1.1rem">
+    Replies from contacts {{ charlie_name }} reached out to. {{ charlie_name }} suggests a
+    reply or hands off when unsure — you send it, redirect her, or take it over. Nothing
+    goes to a contact until you send it.</p>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  {% if not conversations_enabled %}
+  <div class="banner" style="background:#f0f9ff;border-color:#bae6fd;color:#075985">
+    Text conversations need both {{ charlie_name }}'s AI key and the GoHighLevel connection.
+    Set <code>ANTHROPIC_API_KEY</code> and the GHL token/location, then contacts' replies
+    will flow in here.</div>
+  {% endif %}
+
+  {% macro thread(c) %}
+    <div class="thread">
+      {% for m in c.messages %}
+        {% if m.role == 'contact' %}
+        <div class="tmsg in"><div class="tbubble">{{ m.body }}</div>
+          <div class="tmeta">{{ c.contact_name or c.phone or 'Contact' }} · {{ fmt_dt(m.created_at) }}</div></div>
+        {% elif m.role == 'charlie' %}
+        <div class="tmsg out"><div class="tbubble charlie">{{ m.body }}</div>
+          <div class="tmeta">{{ charlie_name }} · {{ fmt_dt(m.created_at) }}</div></div>
+        {% else %}
+        <div class="tmsg note"><div class="tbubble note">{{ m.body }}</div>
+          <div class="tmeta">{{ fmt_dt(m.created_at) }}</div></div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% endmacro %}
+
+  {% set active = open_convos | selectattr('attention', '!=', 'none') | list %}
+  <div class="card">
+    <h2 style="margin-bottom:.7rem">Needs you
+      {% if active %}<span class="pill">{{ active|length }}</span>{% endif %}</h2>
+    {% if active %}
+      {% for c in active %}
+      <div class="convo">
+        <div class="convo-head">
+          <div>
+            <span class="who">{{ c.contact_name or c.phone or 'Contact' }}</span>
+            {% if c.phone %}<span class="muted" style="font-size:.82rem"> · {{ c.phone }}</span>{% endif %}
+            {% if c.contact_id %}<a class="muted" style="font-size:.8rem;margin-left:.4rem"
+                 href="/clients/{{ c.contact_id }}">record →</a>{% endif %}
+          </div>
+          {% if c.attention == 'draft' %}<span class="tag responded">Draft ready</span>
+          {% else %}<span class="tag failed">Needs a hand</span>{% endif %}
+        </div>
+
+        {{ thread(c) }}
+
+        {% if c.attention == 'handoff' and c.handoff_note %}
+        <div class="handoff-note"><strong>{{ charlie_name }} needs clarity:</strong>
+          {{ c.handoff_note }}</div>
+        {% endif %}
+
+        {% if c.attention == 'draft' %}
+        <form method="post" action="/inbox/{{ c.id }}/send" class="reply-form">
+          <label class="field"><span>{{ charlie_name }}'s suggested reply — edit if needed, then send</span>
+            <textarea name="body" rows="3" required>{{ c.draft }}</textarea></label>
+          <div class="convo-actions">
+            <button class="btn" type="submit">Send reply</button>
+          </div>
+        </form>
+        {% endif %}
+
+        <details class="convo-more">
+          <summary>{{ 'Give ' + charlie_name + ' direction instead' if c.attention == 'draft' else 'Tell ' + charlie_name + ' how to reply' }}</summary>
+          <form method="post" action="/inbox/{{ c.id }}/direct" class="reply-form" style="margin-top:.5rem">
+            <label class="field">
+              <span>How should {{ charlie_name }} reply? (she'll rewrite it in her voice)</span>
+              <textarea name="direction" rows="2" required
+                placeholder="e.g. Let her know we can fit her in Tuesday at 2pm and we'll confirm by email."></textarea></label>
+            <div class="convo-actions">
+              <button class="btn ghost" type="submit">Have {{ charlie_name }} draft this</button>
+            </div>
+          </form>
+        </details>
+
+        <form method="post" action="/inbox/{{ c.id }}/takeover" style="margin:.2rem 0 0"
+              onsubmit="return confirm('Take this over yourself? It closes the conversation and {{ charlie_name }} steps back.')">
+          <button class="btn ghost small" type="submit">I'll take this — close it</button>
+        </form>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted" style="margin:.2rem 0">Nothing needs you right now. Replies from
+        contacts {{ charlie_name }} texted will appear here.</p>
+    {% endif %}
+  </div>
+
+  {% set waiting = open_convos | selectattr('attention', 'equalto', 'none') | list %}
+  {% if waiting %}
+  <div class="card">
+    <h2 style="margin-bottom:.6rem">Waiting on the contact</h2>
+    <p class="muted" style="margin:.1rem 0 .6rem;font-size:.86rem">Open threads where the
+      last word was ours — {{ charlie_name }} will draft a reply when they text back.</p>
+    <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Contact</th><th>Last activity</th></tr></thead>
+      <tbody>
+      {% for c in waiting %}
+      <tr>
+        <td>{% if c.contact_id %}<a class="who" href="/clients/{{ c.contact_id }}">{{ c.contact_name or c.phone }}</a>
+            {% else %}{{ c.contact_name or c.phone or 'Contact' }}{% endif %}</td>
+        <td class="muted" style="font-size:.85rem">{{ fmt_dt(c.updated_at) }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if closed_convos %}
+  <div class="card">
+    <h2 style="margin-bottom:.6rem">Closed</h2>
+    <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Contact</th><th>Closed</th><th>By</th></tr></thead>
+      <tbody>
+      {% for c in closed_convos %}
+      <tr>
+        <td>{% if c.contact_id %}<a class="who" href="/clients/{{ c.contact_id }}">{{ c.contact_name or c.phone }}</a>
+            {% else %}{{ c.contact_name or c.phone or 'Contact' }}{% endif %}</td>
+        <td class="muted" style="font-size:.85rem">{{ fmt_dt(c.closed_at) if c.closed_at }}</td>
+        <td class="muted" style="font-size:.82rem">{{ c.closed_by or '—' }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  {% endif %}
+{% endblock %}

@@ -146,6 +146,19 @@ CHARLIE_NAME = os.environ.get("CHARLIE_NAME", "Charlie").strip() or "Charlie"
 def charlie_enabled() -> bool:
     return bool(ANTHROPIC_API_KEY)
 
+
+# Charlie's Inbox: when Charlie converses with a contact by text and isn't sure
+# how to answer, she hands off to the team here (and emails this address for
+# clarity). Nothing goes to the contact without a team member's click.
+INBOX_ESCALATION_EMAIL = os.environ.get(
+    "INBOX_ESCALATION_EMAIL", "hello@vmedical.ca"
+).strip() or "hello@vmedical.ca"
+
+
+def charlie_conversations_enabled() -> bool:
+    """Charlie can hold text conversations once the AI + the GHL number are set."""
+    return bool(charlie_enabled() and ghl_contacts_enabled())
+
 # --- Granola meeting notes ---------------------------------------------------
 # Granola records client consults + team meetings and produces an AI summary
 # and transcript for each. We read them through Granola's public API using a
@@ -227,6 +240,8 @@ DEFAULT_ROLE = "team_member"
 #   use_charlie       - chat with Charlie, the AI assistant
 #   view_meetings     - see the Granola meeting notes (queue + team meetings)
 #   manage_meetings   - sync Granola, confirm a consult to a client, dismiss
+#   use_inbox         - see and act on Charlie's conversation inbox (drafts,
+#                       hand-offs): send a reply, direct Charlie, or take over
 ROLE_CAPABILITIES = {
     "super_admin": {
         "view_messages",
@@ -240,6 +255,7 @@ ROLE_CAPABILITIES = {
         "use_charlie",
         "view_meetings",
         "manage_meetings",
+        "use_inbox",
     },
     "spa_manager": {
         "view_messages",
@@ -252,6 +268,7 @@ ROLE_CAPABILITIES = {
         "use_charlie",
         "view_meetings",
         "manage_meetings",
+        "use_inbox",
     },
     "team_member": {
         "view_messages",
@@ -262,6 +279,7 @@ ROLE_CAPABILITIES = {
         "use_charlie",
         "view_meetings",
         "manage_meetings",  # team members confirm which client a consult belongs to
+        "use_inbox",
     },
 }
 

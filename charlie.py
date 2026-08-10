@@ -414,6 +414,137 @@ def ask(question: str, history: Optional[list[dict]] = None) -> dict:
     return {"ok": True, "answer": answer, "sources": [h["title"] for h in hits], "action": action}
 
 
+def _converse_system(context: str, direction: Optional[str]) -> str:
+    persona = _load_persona()
+    kb = context or "(No matching notes were found in the knowledge base.)"
+    direction_block = ""
+    if direction:
+        direction_block = (
+            "\n## Team direction for this reply\n"
+            "A Valley Medical team member has told you how to respond. Follow it, "
+            "written in your warm Charlie voice:\n"
+            f"\"{direction}\"\n"
+        )
+    return (
+        f"{persona}\n\n"
+        "## Operating context (texting a patient)\n"
+        "You are replying to a **patient/contact of the clinic by SMS**, on the "
+        "clinic's behalf. Keep replies warm, brief, and text-message appropriate. "
+        "Use the KNOWLEDGE BASE below when relevant. \n\n"
+        "SAFETY — this matters: never give specific medical advice, diagnoses, "
+        "dosing, or clinical guidance; never make firm commitments about pricing, "
+        "insurance, or specific appointment times/availability unless the knowledge "
+        "base clearly supports it. If you do NOT have enough information to answer "
+        "confidently and safely — or the person needs a human, is upset, or is "
+        "asking something clinical — do NOT guess. Call escalate_to_team with the "
+        "exact question you need answered. Otherwise call reply_to_contact with the "
+        "message to send. Always call exactly one of the two tools.\n"
+        f"{direction_block}\n"
+        "## KNOWLEDGE BASE (clinic notes)\n"
+        f"{kb}"
+    )
+
+
+_CONVERSE_TOOLS = [
+    {
+        "name": "reply_to_contact",
+        "description": ("Send-ready reply to the patient by SMS, in Charlie's warm voice. "
+                        "Use only when you can answer confidently and safely."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"message": {"type": "string",
+                           "description": "The SMS reply to the patient (concise)."}},
+            "required": ["message"],
+        },
+    },
+    {
+        "name": "escalate_to_team",
+        "description": ("Hand off to a Valley Medical team member because you can't answer "
+                        "confidently/safely. Provide the specific question you need clarity on."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"question": {"type": "string",
+                           "description": "What you need the team to clarify."}},
+            "required": ["question"],
+        },
+    },
+]
+
+
+def converse(contact_name: Optional[str], history: list[dict], latest_text: str,
+             direction: Optional[str] = None) -> dict:
+    """
+    Decide how to respond to a patient's text. `history` is prior turns
+    [{role:'contact'|'charlie'|'team', body}]. Returns one of:
+      {"ok": True, "action": "reply", "message": str, "sources": [...]}
+      {"ok": True, "action": "handoff", "question": str, "sources": [...]}
+      {"ok": False, "error": str}
+    On any failure the caller should hand off to the team so nothing is dropped.
+    """
+    latest_text = (latest_text or "").strip()
+    if not enabled():
+        return {"ok": False, "error": "Charlie isn't connected (set ANTHROPIC_API_KEY)."}
+    try:
+        import anthropic
+    except ImportError:
+        return {"ok": False, "error": "The 'anthropic' package isn't installed."}
+
+    query = direction or latest_text
+    hits = retrieve(query)
+    context = _build_context(hits, query)
+
+    messages: list[dict] = []
+    for turn in (history or [])[-12:]:
+        role = "assistant" if turn.get("role") == "charlie" else "user"
+        body = (turn.get("body") or "").strip()
+        if not body:
+            continue
+        # Label who said non-Charlie lines so the model keeps the thread straight.
+        if turn.get("role") == "team":
+            body = f"[team member] {body}"
+        messages.append({"role": role, "content": body})
+    if latest_text and (not messages or messages[-1]["role"] != "user"):
+        messages.append({"role": "user", "content": latest_text})
+    if not messages:
+        messages.append({"role": "user", "content": latest_text or "(no message)"})
+
+    try:
+        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        resp = client.messages.create(
+            model=config.CHARLIE_MODEL,
+            max_tokens=_MAX_TOKENS,
+            system=_converse_system(context, direction),
+            messages=messages,
+            tools=_CONVERSE_TOOLS,
+            tool_choice={"type": "any"},
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"Charlie couldn't draft a reply: {exc}"}
+
+    sources = [h["title"] for h in hits]
+    text_parts = []
+    for b in resp.content:
+        if getattr(b, "type", None) == "tool_use":
+            inp = getattr(b, "input", None) or {}
+            if b.name == "reply_to_contact":
+                msg = (inp.get("message") or "").strip()
+                if msg:
+                    return {"ok": True, "action": "reply", "message": msg, "sources": sources}
+            elif b.name == "escalate_to_team":
+                q = (inp.get("question") or "").strip()
+                return {"ok": True, "action": "handoff",
+                        "question": q or "Charlie wasn't sure how to answer this.",
+                        "sources": sources}
+        elif getattr(b, "type", None) == "text":
+            text_parts.append(b.text)
+    # No usable tool call — treat plain text as a draft if present, else hand off.
+    draft = "".join(text_parts).strip()
+    if draft:
+        return {"ok": True, "action": "reply", "message": draft, "sources": sources}
+    return {"ok": True, "action": "handoff",
+            "question": "Charlie wasn't sure how to answer this.", "sources": sources}
+
+
 def debug(sample_query: str = "test") -> dict:
     """Diagnostic for /charlie?debug=1 (no secrets)."""
     base = _vault_base()

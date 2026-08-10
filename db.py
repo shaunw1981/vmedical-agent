@@ -91,6 +91,33 @@ def init_db() -> None:
                 sent_at     TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS inbox_convos (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                contact_id    TEXT,
+                contact_name  TEXT,
+                phone         TEXT,
+                email         TEXT,
+                channel       TEXT NOT NULL DEFAULT 'sms',
+                status        TEXT NOT NULL DEFAULT 'open',   -- open | closed
+                attention     TEXT NOT NULL DEFAULT 'none',   -- none | draft | handoff
+                draft         TEXT,           -- Charlie's suggested reply (attention=draft)
+                handoff_note  TEXT,           -- what Charlie is unsure about (attention=handoff)
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT NOT NULL,
+                closed_by     TEXT,
+                closed_at     TEXT,
+                close_reason  TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS inbox_messages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                convo_id    INTEGER NOT NULL REFERENCES inbox_convos(id),
+                created_at  TEXT NOT NULL,
+                role        TEXT NOT NULL,   -- contact | charlie | team | system
+                body        TEXT NOT NULL,
+                via         TEXT             -- sms | email | note
+            );
+
             CREATE TABLE IF NOT EXISTS meetings (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 granola_id     TEXT UNIQUE NOT NULL,
@@ -433,6 +460,120 @@ def list_client_summaries() -> list[dict]:
                 g["last_appt"] = at
     return sorted(groups.values(),
                   key=lambda g: g["next_appt"] or g["last_appt"] or "", reverse=True)
+
+
+# --- Charlie's Inbox (conversations) -----------------------------------------
+def add_inbox_message(convo_id: int, role: str, body: str,
+                      via: Optional[str] = None) -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO inbox_messages (convo_id, created_at, role, body, via) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (convo_id, datetime.now().isoformat(timespec="seconds"), role, body, via),
+        )
+        conn.execute("UPDATE inbox_convos SET updated_at = ? WHERE id = ?",
+                     (datetime.now().isoformat(timespec="seconds"), convo_id))
+        return int(cur.lastrowid)
+
+
+def get_open_convo_by_phone(phone: str) -> Optional[dict]:
+    if not phone:
+        return None
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM inbox_convos WHERE phone = ? AND status = 'open' "
+            "ORDER BY id DESC LIMIT 1", (phone,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_or_create_convo(phone: Optional[str] = None, contact_id: Optional[str] = None,
+                        contact_name: Optional[str] = None, email: Optional[str] = None,
+                        channel: str = "sms") -> dict:
+    """Find the open conversation for this phone, or start a new one."""
+    existing = get_open_convo_by_phone(phone) if phone else None
+    if existing:
+        # Backfill contact identity if we learn it later.
+        with _connect() as conn:
+            conn.execute(
+                "UPDATE inbox_convos SET "
+                "contact_id = COALESCE(NULLIF(?, ''), contact_id), "
+                "contact_name = COALESCE(NULLIF(?, ''), contact_name), "
+                "email = COALESCE(NULLIF(?, ''), email) WHERE id = ?",
+                (contact_id or "", contact_name or "", email or "", existing["id"]),
+            )
+        return get_convo(existing["id"])
+    now = datetime.now().isoformat(timespec="seconds")
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO inbox_convos (contact_id, contact_name, phone, email, channel, "
+            " status, attention, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 'open', 'none', ?, ?)",
+            (contact_id, contact_name, phone, email, channel, now, now),
+        )
+        new_id = int(cur.lastrowid)
+    return get_convo(new_id)
+
+
+def get_convo(convo_id: int) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM inbox_convos WHERE id = ?", (convo_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_convo_messages(convo_id: int) -> list[dict]:
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM inbox_messages WHERE convo_id = ? ORDER BY id ASC",
+            (convo_id,),
+        ).fetchall()]
+
+
+def set_convo_attention(convo_id: int, attention: str, draft: Optional[str] = None,
+                        handoff_note: Optional[str] = None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE inbox_convos SET attention = ?, draft = ?, handoff_note = ?, "
+            "updated_at = ? WHERE id = ?",
+            (attention, draft, handoff_note,
+             datetime.now().isoformat(timespec="seconds"), convo_id),
+        )
+
+
+def set_convo_contact_id(convo_id: int, contact_id: str) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE inbox_convos SET contact_id = ? WHERE id = ?",
+                     (contact_id, convo_id))
+
+
+def close_convo(convo_id: int, by: str, reason: str = "team handling") -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE inbox_convos SET status = 'closed', attention = 'none', "
+            "closed_by = ?, closed_at = ?, close_reason = ?, updated_at = ? WHERE id = ?",
+            (by, now, reason, now, convo_id),
+        )
+
+
+def list_inbox(status: str = "open", limit: int = 100) -> list[dict]:
+    """Conversations for the inbox (newest activity first), each with its messages."""
+    with _connect() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM inbox_convos WHERE status = ? "
+            "ORDER BY updated_at DESC, id DESC LIMIT ?", (status, limit),
+        ).fetchall()]
+    for c in rows:
+        c["messages"] = list_convo_messages(c["id"])
+    return rows
+
+
+def count_inbox_attention() -> int:
+    """Open conversations that need a team member (draft to send or hand-off)."""
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM inbox_convos WHERE status = 'open' AND attention != 'none'"
+        ).fetchone()[0]
 
 
 # --- Granola meeting notes ---------------------------------------------------

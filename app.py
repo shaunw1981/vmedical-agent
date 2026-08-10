@@ -36,6 +36,7 @@ import db
 import email_monitor
 import ghl
 import granola
+import inbox as inbox_svc
 import mailer
 import meetings as meetings_svc
 import obsidian
@@ -44,7 +45,7 @@ import reminders
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.5.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.6.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -114,6 +115,7 @@ def _ctx(request: Request, user: dict, **extra) -> dict:
         "user": user,
         "new_count": db.count_new_messages(),
         "meetings_pending": db.count_pending_meetings(),
+        "inbox_count": db.count_inbox_attention(),
         "obsidian_ok": obsidian.is_configured(),
     }
     base.update(extra)
@@ -632,6 +634,124 @@ def client_add_note(request: Request, contact_id: str, body: str = Form(...)):
     return RedirectResponse(f"/clients/{contact_id}", status_code=303)
 
 
+# --- Inbox (Charlie's conversations) -----------------------------------------
+@app.get("/inbox", response_class=HTMLResponse)
+def inbox_page(request: Request, debug: int = 0):
+    user, resp = _guard(request, "use_inbox")
+    if resp:
+        return resp
+    if debug and config.can(user["role"], "manage_settings"):
+        import json
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(json.dumps({
+            "conversations_enabled": config.charlie_conversations_enabled(),
+            "charlie_enabled": charlie.enabled(),
+            "ghl_contacts_enabled": config.ghl_contacts_enabled(),
+            "email_send_enabled": config.email_send_enabled(),
+            "escalation_email": config.INBOX_ESCALATION_EMAIL,
+            "webhook_secret_set": bool(config.GHL_WEBHOOK_SECRET),
+            "open_needing_attention": db.count_inbox_attention(),
+            "last_inbound_webhook": db.get_setting("inbox_last_webhook"),
+        }, indent=2, default=str))
+    return templates.TemplateResponse(
+        "inbox.html",
+        _ctx(request, user,
+             charlie_name=config.CHARLIE_NAME,
+             conversations_enabled=config.charlie_conversations_enabled(),
+             open_convos=db.list_inbox(status="open"),
+             closed_convos=db.list_inbox(status="closed", limit=25),
+             fmt_dt=reminders.format_iso,
+             flash=request.session.pop("inbox_flash", None)),
+    )
+
+
+@app.post("/inbox/{convo_id}/send")
+def inbox_send(request: Request, convo_id: int, body: str = Form(...)):
+    user, resp = _guard(request, "use_inbox")
+    if resp:
+        return resp
+    result = inbox_svc.send_reply(convo_id, body, actor=user["email"])
+    request.session["inbox_flash"] = ({"ok": True, "msg": f"Reply sent by {config.CHARLIE_NAME}."}
+                                      if result["ok"]
+                                      else {"ok": False, "msg": result["error"]})
+    return RedirectResponse("/inbox", status_code=303)
+
+
+@app.post("/inbox/{convo_id}/direct")
+def inbox_direct(request: Request, convo_id: int, direction: str = Form(...)):
+    user, resp = _guard(request, "use_inbox")
+    if resp:
+        return resp
+    result = inbox_svc.direct(convo_id, direction, actor=user["email"])
+    if result["ok"]:
+        msg = (f"{config.CHARLIE_NAME} drafted a new reply — review and send it below."
+               if result["outcome"] == "draft"
+               else f"{config.CHARLIE_NAME} still needs a hand on this one.")
+        for w in result.get("warnings", []):
+            msg += f" ⚠️ {w}"
+        request.session["inbox_flash"] = {"ok": True, "msg": msg}
+    else:
+        request.session["inbox_flash"] = {"ok": False, "msg": result["error"]}
+    return RedirectResponse("/inbox", status_code=303)
+
+
+@app.post("/inbox/{convo_id}/takeover")
+def inbox_takeover(request: Request, convo_id: int):
+    user, resp = _guard(request, "use_inbox")
+    if resp:
+        return resp
+    inbox_svc.take_over(convo_id, actor=user["email"])
+    request.session["inbox_flash"] = {"ok": True, "msg": "You've taken this over — "
+                                      f"{config.CHARLIE_NAME} will step back and it's closed."}
+    return RedirectResponse("/inbox", status_code=303)
+
+
+@app.post("/webhook/ghl/inbound")
+async def ghl_inbound_webhook(request: Request):
+    """
+    GoHighLevel posts an inbound text (a contact's reply) here. Protect with the
+    shared secret (?secret=… or X-Webhook-Secret). Field names vary by GHL setup,
+    so we match the common ones. Charlie drafts a reply or hands off to the Inbox;
+    nothing is sent to the contact without a team member's click.
+    """
+    if config.GHL_WEBHOOK_SECRET:
+        provided = request.query_params.get("secret") or request.headers.get("x-webhook-secret", "")
+        if provided != config.GHL_WEBHOOK_SECRET:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "expected JSON"}, status_code=400)
+
+    # Only act on inbound messages (ignore our own outbound echoes if GHL sends them).
+    direction = str(_field(payload, "direction", "type", "messageType") or "").lower()
+    if direction and ("out" in direction):
+        return {"status": "ignored_outbound"}
+
+    phone = _field(payload, "phone", "from", "CallFrom", "contact_phone", "number")
+    text = _field(payload, "message", "body", "text", "messageBody", "sms") or ""
+    contact_id = _field(payload, "contact_id", "contactId", "contactID")
+    name = _field(payload, "full_name", "contact_name", "name")
+    if not name:
+        name = f"{_field(payload, 'first_name') or ''} {_field(payload, 'last_name') or ''}".strip() or None
+    email = _field(payload, "email", "contact_email")
+
+    # Stash the raw payload (redacted) so /inbox?debug=1 can confirm the shape.
+    try:
+        import json as _json
+        db.set_setting("inbox_last_webhook", _json.dumps(granola._redact(payload))[:4000])
+    except Exception:  # noqa: BLE001
+        pass
+
+    if not (phone or contact_id) or not str(text).strip():
+        return JSONResponse({"status": "ignored_incomplete"}, status_code=200)
+
+    out = inbox_svc.handle_inbound(phone=str(phone) if phone else None, text=str(text),
+                                   contact_id=str(contact_id) if contact_id else None,
+                                   name=name, email=email)
+    return {"status": "ok", "convo_id": out.get("convo_id"), "outcome": out.get("outcome")}
+
+
 # --- Meetings (Granola notes: client consults + team meetings) ---------------
 @app.get("/meetings", response_class=HTMLResponse)
 def meetings_page(request: Request, debug: int = 0):
@@ -803,6 +923,12 @@ def charlie_action_send(
                 contact_id = contact["id"]
             ghl.send_sms(contact_id, body)
             note = f"✅ Sent the text to {recipient}."
+            # Track the thread so the contact's reply lands in Charlie's Inbox.
+            try:
+                inbox_svc.start_from_outreach(phone=recipient, body=body,
+                                              contact_id=contact_id)
+            except Exception:  # noqa: BLE001 - inbox tracking must not fail the send
+                pass
         db.set_charlie_action_status(action_id, "sent", note)
         db.add_charlie_message(user["email"], "charlie", note)
     except Exception as exc:  # noqa: BLE001

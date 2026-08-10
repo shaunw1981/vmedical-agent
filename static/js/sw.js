@@ -5,7 +5,7 @@
    device — so navigations are network-first and fall back to /offline.
 
    Bump CACHE on every release so old shells are purged. */
-const CACHE = 'vm-shell-v3';
+const CACHE = 'vm-shell-v4';
 
 const SHELL = [
   '/static/css/app.css',
