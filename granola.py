@@ -201,7 +201,13 @@ def _parse_dt(value: Any) -> Optional[datetime]:
 
 
 def _iso(dt: Optional[datetime]) -> str:
-    return dt.astimezone(timezone.utc).isoformat() if dt else ""
+    # Granola's API validates dates as ISO 8601 with a 'Z' suffix (a '+00:00'
+    # offset is rejected), and accepts it without fractional seconds.
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if dt else ""
+
+
+# Granola caps page_size at 30.
+MAX_PAGE_SIZE = 30
 
 
 # --- Categorization ----------------------------------------------------------
@@ -245,25 +251,48 @@ def list_folders() -> list[dict]:
     return out
 
 
+def _notes_page(data: dict) -> list[dict]:
+    page = data.get("notes") or data.get("documents") or data.get("data") \
+        or data.get("_list") or []
+    return [n for n in page if isinstance(n, dict)]
+
+
 def list_notes(created_after: Optional[datetime] = None,
-               page_size: int = 100, max_pages: int = 20) -> list[dict]:
-    """Raw note objects from GET /notes, following cursor pagination."""
+               folder_id: Optional[str] = None,
+               page_size: int = MAX_PAGE_SIZE, max_pages: int = 40) -> list[dict]:
+    """
+    Raw note objects from GET /notes, following cursor pagination. Optionally
+    scoped to a folder. If the server rejects created_after, we drop it and
+    filter by date on our side so a date-format quirk can't break the sync.
+    """
     notes: list[dict] = []
     cursor: Optional[str] = None
+    drop_date = False
     for _ in range(max_pages):
-        params: dict = {"page_size": page_size, "limit": page_size}
-        if created_after:
+        params: dict = {"page_size": min(page_size, MAX_PAGE_SIZE)}
+        if folder_id:
+            params["folder_id"] = folder_id
+        if created_after and not drop_date:
             params["created_after"] = _iso(created_after)
         if cursor:
             params["cursor"] = cursor
-        data = _get("/notes", params=params)
-        page = data.get("notes") or data.get("documents") or data.get("data") \
-            or data.get("_list") or []
-        notes.extend([n for n in page if isinstance(n, dict)])
+        try:
+            data = _get("/notes", params=params)
+        except RuntimeError as exc:
+            if created_after and not drop_date and "created_after" in str(exc):
+                drop_date, cursor = True, None
+                continue  # retry from the first page without the date filter
+            raise
+        page = _notes_page(data)
+        notes.extend(page)
         cursor = _first(data, "cursor", "next_cursor", "nextCursor")
         has_more = _first(data, "has_more", "hasMore", default=bool(cursor and page))
         if not has_more or not cursor or not page:
             break
+    if created_after and drop_date:
+        cutoff = _iso(created_after)
+        notes = [n for n in notes
+                 if not _note_created(n) or (_note_created(n) >= cutoff)]
     return notes
 
 
@@ -304,45 +333,62 @@ def get_transcript(note_id: str) -> str:
 
 # --- Normalized fetch (for the intake queue) ---------------------------------
 
+def _target_folders() -> list[tuple[dict, str]]:
+    """Granola folders that map to a section, as (folder, category) pairs."""
+    pairs: list[tuple[dict, str]] = []
+    for f in list_folders():
+        cat = categorize([f.get("name", "")])
+        if cat and f.get("id"):
+            pairs.append((f, cat))
+    return pairs
+
+
+def _record(note: dict, category: str, folder_name: str,
+            with_transcript: bool) -> Optional[dict]:
+    nid = str(_first(note, "id", "_id", "document_id", default=""))
+    if not nid:
+        return None
+    rec = {
+        "granola_id": nid,
+        "category": category,
+        "title": _first(note, "title", "name", default="(untitled meeting)"),
+        "meeting_date": _note_created(note),
+        "folder": folder_name,
+        "attendees": _note_attendees(note),
+        "summary": _note_summary(note),
+        "transcript": "",
+    }
+    if with_transcript:
+        try:
+            rec["transcript"] = get_transcript(nid)
+        except Exception:  # noqa: BLE001
+            rec["transcript"] = ""
+    return rec
+
+
 def fetch_recent(days: int = 30, with_transcripts: bool = True) -> list[dict]:
     """
-    Recent client-consult + team meetings, normalized for storage. Only notes
-    that fall into one of the two configured folders are returned.
+    Recent client-consult + team meetings, normalized for storage. Driven by the
+    Granola folders themselves: each folder that matches a configured name is
+    listed by its id and its notes inherit that folder's category. A note seen in
+    more than one folder is filed once, preferring the client category.
     """
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    notes = list_notes(created_after=since)
-
-    # If notes don't carry folder membership, fall back to folder→document_ids.
-    folder_index: dict[str, list[str]] = {}
-    if notes and not _note_folders(notes[0]):
-        folder_index = _build_folder_index()
-
-    out: list[dict] = []
-    for n in notes:
-        nid = str(_first(n, "id", "_id", "document_id", default=""))
-        if not nid:
-            continue
-        folders = _note_folders(n) or folder_index.get(nid, [])
-        category = categorize(folders)
-        if category is None:
-            continue
-        rec = {
-            "granola_id": nid,
-            "category": category,
-            "title": _first(n, "title", "name", default="(untitled meeting)"),
-            "meeting_date": _note_created(n),
-            "folder": folders[0] if folders else "",
-            "attendees": _note_attendees(n),
-            "summary": _note_summary(n),
-            "transcript": "",
-        }
-        if with_transcripts:
-            try:
-                rec["transcript"] = get_transcript(nid)
-            except Exception:  # noqa: BLE001
-                rec["transcript"] = ""
-        out.append(rec)
-    return out
+    by_id: dict[str, dict] = {}
+    for folder, category in _target_folders():
+        try:
+            notes = list_notes(created_after=since, folder_id=folder["id"])
+        except Exception:  # noqa: BLE001
+            notes = []
+        for n in notes:
+            rec = _record(n, category, folder.get("name", ""), with_transcripts)
+            if not rec:
+                continue
+            prev = by_id.get(rec["granola_id"])
+            # First win, but let a client categorization override a team one.
+            if prev is None or (prev["category"] == "team" and category == "client"):
+                by_id[rec["granola_id"]] = rec
+    return list(by_id.values())
 
 
 def _build_folder_index() -> dict[str, list[str]]:
@@ -390,17 +436,61 @@ def debug() -> dict:
     }
     if not is_configured():
         return out
+
+    folders: list[dict] = []
     try:
-        out["folders"] = list_folders()
+        folders = list_folders()
+        out["folders"] = folders
     except Exception as exc:  # noqa: BLE001
         out["folders_error"] = str(exc)
+
+    targets = [(f, categorize([f.get("name", "")])) for f in folders]
+    targets = [(f, c) for f, c in targets if c and f.get("id")]
+    out["target_folders"] = [{"id": f["id"], "name": f["name"], "category": c}
+                             for f, c in targets]
+
+    # Which query param scopes /notes to a folder? Probe folder_id vs folder.
+    probes = []
+    for f, cat in targets[:4]:
+        entry: dict = {"folder": f.get("name"), "id": f.get("id"), "category": cat}
+        for param in ("folder_id", "folder"):
+            try:
+                d = _get("/notes", params={"page_size": 3, param: f["id"]})
+                page = _notes_page(d)
+                entry[f"{param}_count"] = len(page)
+                if page and "sample_note_keys" not in entry:
+                    entry["sample_note_keys"] = sorted(page[0].keys())
+                    entry["sample_note"] = _redact(page[0])
+            except Exception as exc:  # noqa: BLE001
+                entry[f"{param}_error"] = str(exc)
+        probes.append(entry)
+    out["folder_probes"] = probes
+
+    # Confirm the created_after date format is accepted.
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    out["created_after_sent"] = _iso(since)
     try:
-        raw = _get("/notes", params={"page_size": 3, "limit": 3})
-        out["notes_raw_sample"] = _redact(raw)
+        _get("/notes", params={"page_size": 3, "created_after": _iso(since)})
+        out["created_after_ok"] = True
     except Exception as exc:  # noqa: BLE001
-        out["notes_error"] = str(exc)
+        out["created_after_error"] = str(exc)
+
+    # Transcript probe on the first note we can find.
+    first_id = None
+    for p in probes:
+        sn = p.get("sample_note")
+        if isinstance(sn, dict):
+            first_id = _first(sn, "id", "_id", "document_id")
+            if first_id:
+                break
+    if first_id:
+        try:
+            out["transcript_sample"] = (get_transcript(str(first_id)) or "")[:400]
+        except Exception as exc:  # noqa: BLE001
+            out["transcript_error"] = str(exc)
+
     try:
-        parsed = fetch_recent(days=60, with_transcripts=False)
+        parsed = fetch_recent(days=90, with_transcripts=False)
         out["parsed_count"] = len(parsed)
         out["parsed_sample"] = [
             {k: (v[:200] + "…" if isinstance(v, str) and len(v) > 200 else v)
