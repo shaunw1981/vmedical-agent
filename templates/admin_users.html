@@ -3,9 +3,46 @@
 {% block nav %}team{% endblock %}
 {% block content %}
   <h1>Team &amp; access</h1>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
   <div class="card">
-    <p class="muted">New team members appear here automatically the first time
-      they sign in with Google. Set each person's access level below.
+    <h2 style="margin:0 0 .6rem">Add a team member</h2>
+    <p class="muted" style="margin:.1rem 0 .8rem;font-size:.9rem">
+      Add someone by email. They can sign in with <strong>Google</strong>, and if you set a
+      password here they can also sign in with <strong>email + password</strong>. Leave the
+      password blank for Google-only.</p>
+    <form method="post" action="/admin/users/new" class="modal-form" style="max-width:640px">
+      <div class="field-row">
+        <label class="field"><span>Email</span>
+          <input type="email" name="email" required placeholder="name@vmedical.ca"></label>
+        <label class="field"><span>Name</span>
+          <input type="text" name="name" placeholder="First Last"></label>
+      </div>
+      <div class="field-row">
+        <label class="field"><span>Access level</span>
+          <select name="role">
+            {% for r in ROLES %}
+              {% if user.role == 'super_admin' or r == 'team_member' %}
+              <option value="{{ r }}" {{ 'selected' if r == 'team_member' }}>{{ ROLE_LABELS[r] }}</option>
+              {% endif %}
+            {% endfor %}
+          </select></label>
+        <label class="field"><span>Password <span class="muted">(optional)</span></span>
+          <input type="text" name="password" autocomplete="new-password"
+                 placeholder="At least 8 characters, or leave blank"></label>
+      </div>
+      <div class="modal-actions" style="justify-content:flex-start">
+        <button class="btn" type="submit">Add member</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <p class="muted">Team members added above (or who signed in with Google) appear here.
+      Set each person's access level below.
       {% if user.role == 'spa_manager' %}
       As a Spa Manager you can manage Team Members.{% endif %}</p>
     <table class="stack">

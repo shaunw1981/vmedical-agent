@@ -45,7 +45,7 @@ import reminders
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.6.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.7.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -186,6 +186,20 @@ async def auth_callback(request: Request):
             status_code=400,
         )
 
+    request.session["user"] = {"email": user["email"]}
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/auth/password")
+def auth_password(request: Request, email: str = Form(...), password: str = Form(...)):
+    try:
+        user = auth.authenticate_password(email, password)
+    except auth.LoginError as exc:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "google_ok": auth.google_configured(), "error": str(exc)},
+            status_code=401,
+        )
     request.session["user"] = {"email": user["email"]}
     return RedirectResponse("/", status_code=303)
 
@@ -1087,8 +1101,64 @@ def users_page(request: Request):
     if resp:
         return resp
     return templates.TemplateResponse(
-        "admin_users.html", _ctx(request, user, users=db.list_users())
+        "admin_users.html", _ctx(request, user, users=db.list_users(),
+                                 flash=request.session.pop("users_flash", None)),
     )
+
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+@app.post("/admin/users/new")
+def add_user(
+    request: Request,
+    email: str = Form(...),
+    name: str = Form(""),
+    role: str = Form("team_member"),
+    password: str = Form(""),
+):
+    actor, resp = _guard(request, "manage_users")
+    if resp:
+        return resp
+    email = (email or "").strip().lower()
+    name = (name or "").strip()
+    password = (password or "").strip()
+
+    # A Spa Manager may only add Team Members; a Super Admin may set any role.
+    if actor["role"] != "super_admin":
+        role = "team_member"
+    if role not in config.ROLES:
+        role = "team_member"
+
+    def fail(msg):
+        request.session["users_flash"] = {"ok": False, "msg": msg}
+        return RedirectResponse("/admin/users", status_code=303)
+
+    if not _EMAIL_RE.match(email):
+        return fail("Enter a valid email address.")
+    if password and len(password) < 8:
+        return fail("Password must be at least 8 characters (or leave it blank for Google-only).")
+
+    pw_hash = auth.hash_password(password) if password else None
+    existing = db.get_user_by_email(email)
+    if existing:
+        # Already on the team — set/refresh a password if one was provided.
+        if pw_hash:
+            db.set_user_password(email, pw_hash)
+            request.session["users_flash"] = {"ok": True,
+                "msg": f"{email} is already on the team — password updated."}
+        else:
+            request.session["users_flash"] = {"ok": False, "msg": f"{email} is already on the team."}
+        return RedirectResponse("/admin/users", status_code=303)
+
+    try:
+        db.create_user(email, name or email, role, password_hash=pw_hash)
+    except Exception as exc:  # noqa: BLE001
+        return fail(f"Couldn't add member: {exc}")
+    how = "Google or their password" if pw_hash else "Google"
+    request.session["users_flash"] = {"ok": True,
+        "msg": f"Added {name or email} as {config.ROLE_LABELS[role]}. They can sign in with {how}."}
+    return RedirectResponse("/admin/users", status_code=303)
 
 
 @app.post("/admin/users/role")

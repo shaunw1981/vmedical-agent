@@ -12,6 +12,10 @@ New team members simply sign in with Google once; a Super Admin or Spa Manager
 then sets their role from the Team page.
 """
 
+import base64
+import hashlib
+import hmac
+import os
 from typing import Optional
 
 from authlib.integrations.starlette_client import OAuth
@@ -21,6 +25,46 @@ import config
 import db
 
 oauth = OAuth()
+
+# --- Password hashing (stdlib PBKDF2 — no extra dependency) -------------------
+_PBKDF2_ITERS = 200_000
+
+
+def hash_password(password: str) -> str:
+    """Return a self-describing PBKDF2 hash: pbkdf2_sha256$iters$salt$hash."""
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ITERS)
+    return "pbkdf2_sha256${}${}${}".format(
+        _PBKDF2_ITERS, base64.b64encode(salt).decode(), base64.b64encode(dk).decode())
+
+
+def verify_password(password: str, stored: Optional[str]) -> bool:
+    if not stored or not password:
+        return False
+    try:
+        algo, iters, salt_b64, hash_b64 = stored.split("$")
+        if algo != "pbkdf2_sha256":
+            return False
+        salt = base64.b64decode(salt_b64)
+        expected = base64.b64decode(hash_b64)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, int(iters))
+        return hmac.compare_digest(dk, expected)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def authenticate_password(email: str, password: str) -> dict:
+    """
+    Check an email + password login. Returns the user record, or raises
+    LoginError. Works for any team member who has a password set on the Team page.
+    """
+    email = (email or "").strip().lower()
+    user = db.get_user_by_email(email)
+    if not user or not user.get("password_hash") or not verify_password(password, user["password_hash"]):
+        raise LoginError("Wrong email or password.")
+    if not user["active"]:
+        raise LoginError("This account has been disabled. Contact an administrator.")
+    return user
 
 # Only register Google if credentials are present, so the app still boots for
 # local testing without them.
@@ -70,6 +114,9 @@ def process_google_userinfo(userinfo: dict) -> dict:
         or domain in config.ALLOWED_EMAIL_DOMAINS
         or email == config.SUPER_ADMIN_EMAIL
         or email in config.EXTRA_ALLOWED_EMAILS
+        # A team member added on the Team page can always sign in with Google,
+        # even if their email's domain isn't on the allow-list.
+        or db.get_user_by_email(email) is not None
     )
     if not allowed:
         raise LoginError("This account isn't approved to sign in. Contact your administrator.")

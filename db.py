@@ -165,6 +165,9 @@ def init_db() -> None:
         existing = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
         if "duration" not in existing:
             conn.execute("ALTER TABLE messages ADD COLUMN duration TEXT")
+        user_cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+        if user_cols and "password_hash" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
         appt_cols = {row["name"] for row in conn.execute("PRAGMA table_info(appointments)")}
         if appt_cols and "ghl_appointment_id" not in appt_cols:
             conn.execute("ALTER TABLE appointments ADD COLUMN ghl_appointment_id TEXT")
@@ -197,6 +200,26 @@ def upsert_user_on_login(email: str, name: str, role_if_new: str) -> dict:
             (email, name, role_if_new, datetime.now().isoformat(timespec="seconds")),
         )
     return get_user_by_email(email)
+
+
+def create_user(email: str, name: str, role: str,
+                password_hash: Optional[str] = None, active: bool = True) -> dict:
+    """Create a team member directly (from the Team page). Raises on duplicate email."""
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO users (email, name, role, active, created_at, password_hash) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (email.lower(), name, role, 1 if active else 0,
+             datetime.now().isoformat(timespec="seconds"), password_hash),
+        )
+    return get_user_by_email(email)
+
+
+def set_user_password(email: str, password_hash: Optional[str]) -> None:
+    """Set (or clear, with None) a user's password hash."""
+    with _connect() as conn:
+        conn.execute("UPDATE users SET password_hash = ? WHERE email = ?",
+                     (password_hash, email.lower()))
 
 
 def list_users() -> list[dict]:

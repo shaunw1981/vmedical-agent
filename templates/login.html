@@ -34,6 +34,17 @@
     .err { background:#fef2f2; border:1px solid #fecaca; color:#991b1b;
            padding:.6rem .9rem; border-radius:8px; margin-bottom:1rem;
            font-size:.9rem; }
+    .divider { display:flex; align-items:center; gap:.6rem; color:#9ca3af;
+           font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; margin:1.1rem 0 .8rem; }
+    .divider::before, .divider::after { content:""; flex:1; height:1px; background:#e5e7eb; }
+    .pwform { text-align:left; display:flex; flex-direction:column; gap:.55rem; }
+    .pwform label { font-size:.8rem; font-weight:600; color:#4b5563; }
+    .pwform input { width:100%; box-sizing:border-box; padding:.55rem .7rem; font-size:.95rem;
+           border:1px solid #d0d5dd; border-radius:8px; }
+    .pwform input:focus { outline:none; border-color:#7c8a73; box-shadow:0 0 0 3px #eef0ed; }
+    .pwbtn { margin-top:.3rem; background:#7c8a73; color:#fff; border:0; border-radius:8px;
+           padding:.6rem 1rem; font-weight:600; font-size:.95rem; cursor:pointer; }
+    .pwbtn:hover { background:#5f7060; }
     .note { margin-top:1rem; font-size:.82rem; color:#9ca3af; }
   </style>
 </head>
@@ -52,6 +63,18 @@
       <div class="err">Google sign-in isn't configured yet. Add the Google
         credentials to <code>.env</code> (see SETUP-MACMINI.md).</div>
     {% endif %}
+
+    <div class="divider"><span>or</span></div>
+    <form class="pwform" method="post" action="/auth/password">
+      <label for="pw-email">Email</label>
+      <input id="pw-email" type="email" name="email" autocomplete="username" required
+             placeholder="name@vmedical.ca">
+      <label for="pw-pass">Password</label>
+      <input id="pw-pass" type="password" name="password" autocomplete="current-password" required
+             placeholder="Your password">
+      <button class="pwbtn" type="submit">Sign in with password</button>
+    </form>
+
     <div class="note">Access is limited to the spa's team.</div>
   </div>
 </body>
