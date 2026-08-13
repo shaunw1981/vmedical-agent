@@ -45,7 +45,7 @@ import reminders
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.7.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.8.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1184,6 +1184,52 @@ def toggle_active(request: Request, email: str = Form(...), active: str = Form(.
     if target and _may_manage(actor, target) and target["email"] != actor["email"]:
         db.set_user_active(email, active == "true")
     return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/users/password")
+def set_password(request: Request, email: str = Form(...), password: str = Form("")):
+    actor, resp = _guard(request, "manage_users")
+    if resp:
+        return resp
+    target = db.get_user_by_email(email)
+
+    def flash(ok, msg):
+        request.session["users_flash"] = {"ok": ok, "msg": msg}
+        return RedirectResponse("/admin/users", status_code=303)
+
+    # You may set your own password, or that of anyone you're allowed to manage.
+    if not target or not (target["email"] == actor["email"] or _may_manage(actor, target)):
+        return flash(False, "You can't change that person's password.")
+    password = (password or "").strip()
+    if not password:
+        # Empty = remove the password (Google-only sign-in).
+        db.set_user_password(email, None)
+        return flash(True, f"Password removed for {email}. They can still sign in with Google.")
+    if len(password) < 8:
+        return flash(False, "Password must be at least 8 characters.")
+    db.set_user_password(email, auth.hash_password(password))
+    return flash(True, f"Password updated for {email}.")
+
+
+@app.post("/admin/users/delete")
+def delete_user(request: Request, email: str = Form(...)):
+    actor, resp = _guard(request, "manage_users")
+    if resp:
+        return resp
+    target = db.get_user_by_email(email)
+
+    def flash(ok, msg):
+        request.session["users_flash"] = {"ok": ok, "msg": msg}
+        return RedirectResponse("/admin/users", status_code=303)
+
+    if not target:
+        return flash(False, "That person isn't on the team.")
+    if target["email"] == actor["email"]:
+        return flash(False, "You can't remove your own account.")
+    if not _may_manage(actor, target):
+        return flash(False, "You can't remove that person.")
+    db.delete_user(email)
+    return flash(True, f"Removed {target['name'] or email} from the team.")
 
 
 # --- GoHighLevel webhook: after-hours call transcripts -----------------------

@@ -222,6 +222,12 @@ def set_user_password(email: str, password_hash: Optional[str]) -> None:
                      (password_hash, email.lower()))
 
 
+def delete_user(email: str) -> None:
+    """Remove a team member entirely."""
+    with _connect() as conn:
+        conn.execute("DELETE FROM users WHERE email = ?", (email.lower(),))
+
+
 def list_users() -> list[dict]:
     with _connect() as conn:
         return [dict(r) for r in conn.execute(
