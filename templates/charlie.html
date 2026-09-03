@@ -29,11 +29,15 @@
   {% if not charlie_enabled %}
     <div class="card">
       <h2>Turn {{ charlie_name }} on</h2>
-      <p class="muted" style="margin-top:.2rem">{{ charlie_name }} needs an Anthropic API key.</p>
+      <p class="muted" style="margin-top:.2rem">{{ charlie_name }} needs an engine — a
+        local model (private, on this Mac) or the Anthropic API (cloud).</p>
       <ol class="setup-steps">
-        <li>Get an API key from <strong>console.anthropic.com</strong>.</li>
-        <li>Add <code>ANTHROPIC_API_KEY=…</code> to <code>.env</code>
-            (optionally <code>CHARLIE_MODEL=claude-sonnet-5</code> for lower cost).</li>
+        <li><strong>Local (recommended for privacy):</strong> install Ollama and pull a
+            model (<code>ollama pull qwen2.5:14b</code>), then set
+            <code>CHARLIE_PROVIDER=ollama</code> in <code>.env</code>
+            (and <code>OLLAMA_MODEL=…</code> to match what you pulled).</li>
+        <li><strong>Cloud:</strong> get a key from <strong>console.anthropic.com</strong> and
+            add <code>ANTHROPIC_API_KEY=…</code> to <code>.env</code>.</li>
         <li>Double-click <code>restart.command</code>, then reload this page.</li>
       </ol>
     </div>

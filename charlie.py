@@ -17,9 +17,12 @@ phase, and it will require an explicit human "send" confirmation.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Optional
+
+import httpx
 
 import config
 import obsidian
@@ -342,6 +345,128 @@ def setup_brain() -> dict:
     return {"ok": True, "brain": str(brain), "created": created, "existed": existed}
 
 
+# ---------------------------------------------------------------------------
+# LLM backend — one interface, two engines (Anthropic cloud / local Ollama).
+# ---------------------------------------------------------------------------
+# Tools are authored once in Anthropic's shape ({name, description, input_schema}).
+# For Ollama we translate them to the OpenAI function shape it accepts. Both
+# engines return the same normalized result so ask()/converse() don't care which
+# one ran:  {"text": str, "tool_calls": [{"name": str, "input": dict}, ...]}
+
+def _to_openai_tools(tools: list[dict]) -> list[dict]:
+    return [{
+        "type": "function",
+        "function": {
+            "name": t["name"],
+            "description": t.get("description", ""),
+            "parameters": t.get("input_schema", {"type": "object", "properties": {}}),
+        },
+    } for t in (tools or [])]
+
+
+def _chat(provider: str, system: str, messages: list[dict],
+          tools: Optional[list[dict]] = None, force_tool: bool = False) -> dict:
+    """Run one turn on the chosen engine. Raises RuntimeError on failure."""
+    if provider == "ollama":
+        return _chat_ollama(system, messages, tools, force_tool)
+    return _chat_anthropic(system, messages, tools, force_tool)
+
+
+def _chat_anthropic(system: str, messages: list[dict],
+                    tools: Optional[list[dict]], force_tool: bool) -> dict:
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("The 'anthropic' package isn't installed — run update.command.")
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    kwargs = dict(model=config.CHARLIE_MODEL, max_tokens=_MAX_TOKENS,
+                  system=system, messages=messages)
+    if tools:
+        kwargs["tools"] = tools
+        if force_tool:
+            kwargs["tool_choice"] = {"type": "any"}
+    resp = client.messages.create(**kwargs)
+    text_parts, calls = [], []
+    for b in resp.content:
+        bt = getattr(b, "type", None)
+        if bt == "text":
+            text_parts.append(b.text)
+        elif bt == "tool_use":
+            calls.append({"name": getattr(b, "name", "") or "",
+                          "input": getattr(b, "input", None) or {}})
+    return {"text": "".join(text_parts).strip(), "tool_calls": calls}
+
+
+def _chat_ollama(system: str, messages: list[dict],
+                 tools: Optional[list[dict]], force_tool: bool) -> dict:
+    """Talk to a local Ollama server via its OpenAI-compatible endpoint."""
+    url = f"{config.OLLAMA_URL}/v1/chat/completions"
+    body: dict = {
+        "model": config.OLLAMA_MODEL,
+        "messages": [{"role": "system", "content": system}, *messages],
+        "max_tokens": _MAX_TOKENS,
+        "stream": False,
+    }
+    if tools:
+        body["tools"] = _to_openai_tools(tools)
+        # "required" forces a tool call (used for the patient-texting path); local
+        # models honor this less reliably than Claude, but the callers fail safe.
+        body["tool_choice"] = "required" if force_tool else "auto"
+    try:
+        with httpx.Client(timeout=config.OLLAMA_TIMEOUT) as client:
+            r = client.post(url, json=body, headers={"Authorization": "Bearer ollama"})
+    except httpx.RequestError as exc:
+        raise RuntimeError(
+            f"Couldn't reach Ollama at {config.OLLAMA_URL} — is `ollama serve` running "
+            f"and is {config.OLLAMA_MODEL} pulled? ({exc})")
+    if r.status_code >= 400:
+        snippet = (r.text or "").strip()
+        if len(snippet) > 300:
+            snippet = snippet[:300] + "…"
+        raise RuntimeError(f"Ollama returned {r.status_code}: {snippet}")
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        raise RuntimeError("Ollama returned a response that wasn't JSON.")
+    choice = (data.get("choices") or [{}])[0]
+    msg = choice.get("message") or {}
+    text = (msg.get("content") or "").strip()
+    calls = []
+    for tc in msg.get("tool_calls") or []:
+        fn = tc.get("function") or {}
+        name = fn.get("name") or ""
+        args = fn.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args or "{}")
+            except Exception:  # noqa: BLE001
+                args = {}
+        if not isinstance(args, dict):
+            args = {}
+        if name:
+            calls.append({"name": name, "input": args})
+    return {"text": text, "tool_calls": calls}
+
+
+def ollama_status() -> dict:
+    """Lightweight reachability + model check for diagnostics (no generation)."""
+    out = {"url": config.OLLAMA_URL, "model": config.OLLAMA_MODEL,
+           "reachable": False, "model_available": None}
+    try:
+        with httpx.Client(timeout=5) as client:
+            r = client.get(f"{config.OLLAMA_URL}/api/tags")
+        out["reachable"] = r.status_code < 400
+        if out["reachable"]:
+            names = [m.get("name", "") for m in (r.json().get("models") or [])]
+            out["models"] = names
+            base = config.OLLAMA_MODEL.split(":")[0]
+            out["model_available"] = any(
+                n == config.OLLAMA_MODEL or n.split(":")[0] == base for n in names)
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = str(exc)
+    return out
+
+
 def ask(question: str, history: Optional[list[dict]] = None) -> dict:
     """
     Answer a question. `history` is prior turns [{role:'user'|'charlie', content}].
@@ -351,12 +476,8 @@ def ask(question: str, history: Optional[list[dict]] = None) -> dict:
     if not question:
         return {"ok": False, "error": "Ask Charlie a question first."}
     if not enabled():
-        return {"ok": False, "error": "Charlie isn't connected yet (set ANTHROPIC_API_KEY)."}
-
-    try:
-        import anthropic
-    except ImportError:
-        return {"ok": False, "error": "The 'anthropic' package isn't installed — run update.command."}
+        return {"ok": False, "error": "Charlie isn't connected yet "
+                "(set CHARLIE_PROVIDER=ollama, or add an ANTHROPIC_API_KEY)."}
 
     hits = retrieve(question)
     context = _build_context(hits, question)
@@ -373,34 +494,24 @@ def ask(question: str, history: Optional[list[dict]] = None) -> dict:
     messages.append({"role": "user", "content": question})
 
     try:
-        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        kwargs = dict(
-            model=config.CHARLIE_MODEL,
-            max_tokens=_MAX_TOKENS,
-            system=_system_prompt(context, can_email, can_sms),
-            messages=messages,
-        )
-        if tools:
-            kwargs["tools"] = tools
-        resp = client.messages.create(**kwargs)
+        res = _chat(config.charlie_provider_for("ask"),
+                    _system_prompt(context, can_email, can_sms), messages, tools=tools)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"Charlie couldn't answer: {exc}"}
 
-    answer_parts, action = [], None
-    for b in resp.content:
-        btype = getattr(b, "type", None)
-        if btype == "text":
-            answer_parts.append(b.text)
-        elif btype == "tool_use" and action is None and getattr(b, "name", "") in ("send_email", "send_sms"):
-            inp = getattr(b, "input", None) or {}
-            if b.name == "send_email":
-                action = {"channel": "email", "to": (inp.get("to") or "").strip(),
-                          "subject": (inp.get("subject") or "").strip(),
-                          "body": (inp.get("body") or "").strip()}
-            else:
-                action = {"channel": "sms", "to": (inp.get("to") or "").strip(),
-                          "subject": "", "body": (inp.get("body") or "").strip()}
-    answer = "".join(answer_parts).strip()
+    answer = res["text"]
+    action = None
+    for call in res["tool_calls"]:
+        if action is not None:
+            break
+        name, inp = call["name"], call["input"]
+        if name == "send_email" and can_email:
+            action = {"channel": "email", "to": (inp.get("to") or "").strip(),
+                      "subject": (inp.get("subject") or "").strip(),
+                      "body": (inp.get("body") or "").strip()}
+        elif name == "send_sms" and can_sms:
+            action = {"channel": "sms", "to": (inp.get("to") or "").strip(),
+                      "subject": "", "body": (inp.get("body") or "").strip()}
 
     if action and not action["body"]:
         action = None  # empty draft — ignore
@@ -483,11 +594,8 @@ def converse(contact_name: Optional[str], history: list[dict], latest_text: str,
     """
     latest_text = (latest_text or "").strip()
     if not enabled():
-        return {"ok": False, "error": "Charlie isn't connected (set ANTHROPIC_API_KEY)."}
-    try:
-        import anthropic
-    except ImportError:
-        return {"ok": False, "error": "The 'anthropic' package isn't installed."}
+        return {"ok": False, "error": "Charlie isn't connected "
+                "(set CHARLIE_PROVIDER=ollama, or add an ANTHROPIC_API_KEY)."}
 
     query = direction or latest_text
     hits = retrieve(query)
@@ -509,36 +617,28 @@ def converse(contact_name: Optional[str], history: list[dict], latest_text: str,
         messages.append({"role": "user", "content": latest_text or "(no message)"})
 
     try:
-        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        resp = client.messages.create(
-            model=config.CHARLIE_MODEL,
-            max_tokens=_MAX_TOKENS,
-            system=_converse_system(context, direction),
-            messages=messages,
-            tools=_CONVERSE_TOOLS,
-            tool_choice={"type": "any"},
-        )
+        res = _chat(config.charlie_provider_for("converse"),
+                    _converse_system(context, direction), messages,
+                    tools=_CONVERSE_TOOLS, force_tool=True)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"Charlie couldn't draft a reply: {exc}"}
 
     sources = [h["title"] for h in hits]
-    text_parts = []
-    for b in resp.content:
-        if getattr(b, "type", None) == "tool_use":
-            inp = getattr(b, "input", None) or {}
-            if b.name == "reply_to_contact":
-                msg = (inp.get("message") or "").strip()
-                if msg:
-                    return {"ok": True, "action": "reply", "message": msg, "sources": sources}
-            elif b.name == "escalate_to_team":
-                q = (inp.get("question") or "").strip()
-                return {"ok": True, "action": "handoff",
-                        "question": q or "Charlie wasn't sure how to answer this.",
-                        "sources": sources}
-        elif getattr(b, "type", None) == "text":
-            text_parts.append(b.text)
-    # No usable tool call — treat plain text as a draft if present, else hand off.
-    draft = "".join(text_parts).strip()
+    reply_msg, handoff_q = None, None
+    for call in res["tool_calls"]:
+        if call["name"] == "reply_to_contact" and reply_msg is None:
+            reply_msg = (call["input"].get("message") or "").strip()
+        elif call["name"] == "escalate_to_team" and handoff_q is None:
+            handoff_q = (call["input"].get("question") or "").strip()
+    # A concrete reply wins; then an escalation; then plain text as a draft; then
+    # a safe hand-off so a patient's message is never silently dropped.
+    if reply_msg:
+        return {"ok": True, "action": "reply", "message": reply_msg, "sources": sources}
+    if handoff_q is not None:
+        return {"ok": True, "action": "handoff",
+                "question": handoff_q or "Charlie wasn't sure how to answer this.",
+                "sources": sources}
+    draft = res["text"].strip()
     if draft:
         return {"ok": True, "action": "reply", "message": draft, "sources": sources}
     return {"ok": True, "action": "handoff",
@@ -557,9 +657,11 @@ def debug(sample_query: str = "test") -> dict:
         persona_source = "repo-seed"
     else:
         persona_source = "default"
-    return {
+    out = {
         "charlie_enabled": enabled(),
-        "model": config.CHARLIE_MODEL,
+        "provider": config.CHARLIE_PROVIDER,
+        "converse_provider": config.charlie_provider_for("converse"),
+        "model": config.charlie_model(),
         "vault_configured": obsidian.is_configured(),
         "vault_base": str(base) if base else None,
         "brain_dir": str(brain) if brain else None,
@@ -568,6 +670,9 @@ def debug(sample_query: str = "test") -> dict:
         "sample_query": sample_query,
         "sample_hits": [h["title"] for h in hits],
     }
+    if "ollama" in (config.CHARLIE_PROVIDER, config.charlie_provider_for("converse")):
+        out["ollama"] = ollama_status()
+    return out
 
 
 def brain_ready() -> bool:

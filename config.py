@@ -136,14 +136,51 @@ def ghl_contacts_enabled() -> bool:
 
 # --- Charlie (the AI assistant) ----------------------------------------------
 # Charlie answers the team's questions, grounded in the Obsidian knowledge base.
-# Needs an Anthropic API key. The model is configurable — claude-opus-5 is the
-# most capable; set CHARLIE_MODEL=claude-sonnet-5 for lower cost.
+#
+# Two engines are supported, chosen with CHARLIE_PROVIDER:
+#   "anthropic" (default) — Claude via the Anthropic API. Needs ANTHROPIC_API_KEY.
+#   "ollama"              — a local model (e.g. Qwen) served by Ollama on this
+#                           machine. Nothing leaves the box; no API key needed.
+CHARLIE_PROVIDER = (os.environ.get("CHARLIE_PROVIDER", "anthropic").strip().lower()
+                    or "anthropic")
+
+# Anthropic (cloud) settings. claude-opus-5 is most capable; claude-sonnet-5 is
+# cheaper. Only used when a path runs on the "anthropic" provider.
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 CHARLIE_MODEL = os.environ.get("CHARLIE_MODEL", "claude-opus-5").strip() or "claude-opus-5"
+
+# Ollama (local) settings. OLLAMA_MODEL must match a tag you've pulled — run
+# `ollama list` to see them (e.g. qwen2.5:14b, qwen2.5:7b). OLLAMA_TIMEOUT is in
+# seconds; local generation is slower than the cloud, so keep it generous.
+OLLAMA_URL = (os.environ.get("OLLAMA_URL", "http://localhost:11434").strip().rstrip("/")
+              or "http://localhost:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:14b").strip() or "qwen2.5:14b"
+OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "120") or "120")
+
+# Optional: run the patient-texting path (converse) on a different provider than
+# everything else — e.g. keep patient SMS on Anthropic while internal Ask-Charlie
+# runs locally on Ollama. Leave blank to use CHARLIE_PROVIDER everywhere.
+CHARLIE_CONVERSE_PROVIDER = os.environ.get("CHARLIE_CONVERSE_PROVIDER", "").strip().lower()
+
 CHARLIE_NAME = os.environ.get("CHARLIE_NAME", "Charlie").strip() or "Charlie"
 
 
+def charlie_provider_for(path: str) -> str:
+    """Which engine runs a given path: 'ask' (staff Q&A) or 'converse' (patient SMS)."""
+    if path == "converse" and CHARLIE_CONVERSE_PROVIDER:
+        return CHARLIE_CONVERSE_PROVIDER
+    return CHARLIE_PROVIDER
+
+
+def charlie_model() -> str:
+    """The model name to show in the UI/diagnostics for the primary provider."""
+    return OLLAMA_MODEL if CHARLIE_PROVIDER == "ollama" else CHARLIE_MODEL
+
+
 def charlie_enabled() -> bool:
+    """Charlie is ready when it has an engine: a local Ollama, or an Anthropic key."""
+    if CHARLIE_PROVIDER == "ollama":
+        return True
     return bool(ANTHROPIC_API_KEY)
 
 
