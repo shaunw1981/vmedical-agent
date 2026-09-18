@@ -158,6 +158,21 @@ def init_db() -> None:
                 status         TEXT NOT NULL DEFAULT 'scheduled',  -- scheduled|cancelled
                 note           TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS web_messages (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at    TEXT NOT NULL,
+                name          TEXT,
+                email         TEXT,
+                phone         TEXT,
+                subject       TEXT,
+                message       TEXT NOT NULL,
+                page          TEXT,            -- which page/form it came from
+                status        TEXT NOT NULL DEFAULT 'new',   -- 'new' or 'responded'
+                responded_by  TEXT,
+                responded_at  TEXT,
+                dedupe_key    TEXT UNIQUE      -- so a retry/double-submit is ignored
+            );
             """
         )
         # Lightweight migrations: add columns that newer versions expect, so an
@@ -330,6 +345,53 @@ def mark_message_responded(message_id: int, responded_by: str) -> None:
             "UPDATE messages SET status = 'responded', responded_by = ?, "
             "responded_at = ? WHERE id = ?",
             (responded_by, datetime.now().isoformat(timespec="seconds"), message_id),
+        )
+
+
+# --- Website contact-form messages (folded into the Messages inbox) ----------
+def add_web_message(name: Optional[str], email: Optional[str], phone: Optional[str],
+                    subject: Optional[str], message: str, page: Optional[str] = None,
+                    dedupe_key: Optional[str] = None) -> Optional[int]:
+    """
+    Store a website enquiry. Returns the new id, or None if it was a duplicate
+    (same dedupe_key already seen — a retry or double-submit).
+    """
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO web_messages "
+            "(created_at, name, email, phone, subject, message, page, status, dedupe_key) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?)",
+            (datetime.now().isoformat(timespec="seconds"),
+             name, email, phone, subject, message, page, dedupe_key),
+        )
+        return int(cur.lastrowid) if cur.rowcount else None
+
+
+def list_web_messages(status: Optional[str] = None) -> list[dict]:
+    """Website enquiries, newest first. Optional status filter ('new'|'responded')."""
+    query = "SELECT * FROM web_messages "
+    params: tuple = ()
+    if status:
+        query += "WHERE status = ? "
+        params = (status,)
+    query += "ORDER BY id DESC"
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def count_new_web_messages() -> int:
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM web_messages WHERE status = 'new'"
+        ).fetchone()[0]
+
+
+def mark_web_message_responded(web_message_id: int, responded_by: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE web_messages SET status = 'responded', responded_by = ?, "
+            "responded_at = ? WHERE id = ?",
+            (responded_by, datetime.now().isoformat(timespec="seconds"), web_message_id),
         )
 
 

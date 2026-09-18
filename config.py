@@ -42,6 +42,16 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 # Optional shared secret so only GoHighLevel can post to the call webhook.
 GHL_WEBHOOK_SECRET = os.environ.get("GHL_WEBHOOK_SECRET", "").strip()
 
+# --- Website contact form ----------------------------------------------------
+# The new Valley Medical website POSTs each contact-form submission to
+# /webhook/website/contact. Set a shared secret and have the site include it as
+# ?secret=... or an x-webhook-secret header; leave blank to accept unsigned posts
+# (fine for local testing, not recommended in production).
+WEBSITE_WEBHOOK_SECRET = os.environ.get("WEBSITE_WEBHOOK_SECRET", "").strip()
+# Where to email a heads-up when a new website enquiry arrives. Defaults to the
+# same inbox Charlie escalates to; set WEBSITE_NOTIFY_EMAIL to override.
+WEBSITE_NOTIFY_EMAIL = os.environ.get("WEBSITE_NOTIFY_EMAIL", "").strip()
+
 # --- GoHighLevel social metrics (Social Planner API) -------------------------
 # A sub-account Private Integration Token (GHL -> Settings -> Private
 # Integrations) with the read-only Social Planner scopes

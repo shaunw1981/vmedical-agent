@@ -45,7 +45,7 @@ import reminders
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.9.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.10.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -113,7 +113,7 @@ def _ctx(request: Request, user: dict, **extra) -> dict:
     base = {
         "request": request,
         "user": user,
-        "new_count": db.count_new_messages(),
+        "new_count": db.count_new_messages() + db.count_new_web_messages(),
         "meetings_pending": db.count_pending_meetings(),
         "inbox_count": db.count_inbox_attention(),
         "obsidian_ok": obsidian.is_configured(),
@@ -794,6 +794,91 @@ async def ghl_inbound_webhook(request: Request):
     return {"status": "ok", "convo_id": out.get("convo_id"), "outcome": out.get("outcome")}
 
 
+@app.post("/webhook/website/contact")
+async def website_contact_webhook(request: Request):
+    """
+    The Valley Medical website POSTs a contact-form submission here. Protect with
+    the shared secret (?secret=… or X-Webhook-Secret). Field names are matched
+    forgivingly. A honeypot field ('hp'/'website'/'url') that arrives filled is
+    treated as spam and silently accepted-but-dropped. Stores the enquiry into the
+    Messages inbox and emails a heads-up to the clinic.
+    """
+    if config.WEBSITE_WEBHOOK_SECRET:
+        provided = request.query_params.get("secret") or request.headers.get("x-webhook-secret", "")
+        if provided != config.WEBSITE_WEBHOOK_SECRET:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "expected JSON"}, status_code=400)
+
+    # Honeypot: a real person leaves these empty; a bot fills them. Pretend success.
+    honeypot = _field(payload, "hp", "website", "url", "_gotcha")
+    if honeypot not in (None, ""):
+        return {"status": "ok"}  # drop silently
+
+    name = _field(payload, "name", "full_name", "fullName")
+    if not name:
+        name = f"{_field(payload, 'first_name') or ''} {_field(payload, 'last_name') or ''}".strip() or None
+    email = _field(payload, "email", "email_address", "emailAddress")
+    phone = _field(payload, "phone", "phone_number", "tel")
+    subject = _field(payload, "subject", "topic", "reason")
+    message = _field(payload, "message", "comments", "body", "enquiry", "inquiry", "notes")
+    page = _field(payload, "page", "source_page", "url_path", "form")
+
+    # Stash the raw payload (redacted) so /messages?debug=1 can confirm the shape.
+    try:
+        import json as _json
+        db.set_setting("web_contact_last_webhook", _json.dumps(granola._redact(payload))[:4000])
+    except Exception:  # noqa: BLE001
+        pass
+
+    message = (str(message).strip() if message else "")
+    if not message and not (name or email or phone):
+        return JSONResponse({"status": "ignored_incomplete"}, status_code=200)
+    if not message:
+        message = "(no message text was provided)"
+
+    # Dedupe a retry/double-submit: an explicit id if the site sends one, else a
+    # hash of the meaningful fields.
+    import hashlib
+    explicit_id = _field(payload, "id", "submission_id", "submissionId")
+    basis = str(explicit_id) if explicit_id else "|".join(
+        str(x or "") for x in (name, email, phone, subject, message, page))
+    dedupe_key = hashlib.sha256(basis.encode("utf-8")).hexdigest()
+
+    new_id = db.add_web_message(
+        name=(str(name).strip() if name else None),
+        email=(str(email).strip() if email else None),
+        phone=(str(phone).strip() if phone else None),
+        subject=(str(subject).strip() if subject else None),
+        message=message,
+        page=(str(page).strip() if page else None),
+        dedupe_key=dedupe_key,
+    )
+    if new_id is None:
+        return {"status": "duplicate_ignored"}
+
+    # Heads-up email to the clinic. Never let a mail hiccup fail the webhook.
+    notify_to = config.WEBSITE_NOTIFY_EMAIL or config.INBOX_ESCALATION_EMAIL
+    if notify_to and mailer.enabled():
+        who = (str(name).strip() if name else None) or (str(email).strip() if email else None) or "Website visitor"
+        lines = [f"New website enquiry from {who}.", ""]
+        if name:    lines.append(f"Name:    {str(name).strip()}")
+        if email:   lines.append(f"Email:   {str(email).strip()}")
+        if phone:   lines.append(f"Phone:   {str(phone).strip()}")
+        if subject: lines.append(f"Subject: {str(subject).strip()}")
+        if page:    lines.append(f"Page:    {str(page).strip()}")
+        lines += ["", "Message:", message, "",
+                  "See it in the dashboard under Messages."]
+        try:
+            mailer.send_email(notify_to, f"New website enquiry from {who}", "\n".join(lines))
+        except Exception:  # noqa: BLE001 - notification is best-effort
+            pass
+
+    return {"status": "ok", "id": new_id}
+
+
 # --- Meetings (Granola notes: client consults + team meetings) ---------------
 @app.get("/meetings", response_class=HTMLResponse)
 def meetings_page(request: Request, debug: int = 0):
@@ -1059,20 +1144,41 @@ def _parse_transcript(text: str, caller_name: Optional[str] = None) -> list[dict
 
 
 @app.get("/messages", response_class=HTMLResponse)
-def messages_inbox(request: Request, status: str = "new"):
+def messages_inbox(request: Request, status: str = "new", debug: int = 0):
     user, resp = _guard(request, "view_messages")
     if resp:
         return resp
+    if debug and config.can(user["role"], "manage_settings"):
+        import json as _json
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(_json.dumps({
+            "website_webhook_secret_set": bool(config.WEBSITE_WEBHOOK_SECRET),
+            "website_notify_email": config.WEBSITE_NOTIFY_EMAIL or config.INBOX_ESCALATION_EMAIL,
+            "notify_email_enabled": mailer.enabled(),
+            "web_new": db.count_new_web_messages(),
+            "web_total": len(db.list_web_messages()),
+            "last_web_contact_payload": db.get_setting("web_contact_last_webhook"),
+        }, indent=2, default=str))
     status_filter = None if status == "all" else status
-    messages = db.list_messages(status_filter)
-    for m in messages:
+
+    items: list[dict] = []
+    for m in db.list_messages(status_filter):
         turns = _parse_transcript(m.get("transcript") or "", m.get("client_name"))
         m["turns"] = turns
         m["is_conversation"] = any(t["role"] in ("agent", "caller") for t in turns)
+        m["source"] = "phone"
+        items.append(m)
+    for w in db.list_web_messages(status_filter):
+        w["source"] = "website"
+        items.append(w)
+    # One inbox, newest first across both sources.
+    items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+
     return templates.TemplateResponse(
         "messages.html",
-        _ctx(request, user, messages=messages, active_filter=status,
-             status_counts=db.status_breakdown()),
+        _ctx(request, user, messages=items, active_filter=status,
+             status_counts=db.status_breakdown(),
+             web_new=db.count_new_web_messages()),
     )
 
 
@@ -1082,6 +1188,15 @@ def respond_message(request: Request, message_id: int):
     if resp:
         return resp
     db.mark_message_responded(message_id, user["email"])
+    return RedirectResponse("/messages", status_code=303)
+
+
+@app.post("/messages/web/{web_message_id}/respond")
+def respond_web_message(request: Request, web_message_id: int):
+    user, resp = _guard(request, "respond_messages")
+    if resp:
+        return resp
+    db.mark_web_message_responded(web_message_id, user["email"])
     return RedirectResponse("/messages", status_code=303)
 
 
