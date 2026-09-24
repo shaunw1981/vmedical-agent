@@ -108,11 +108,30 @@ def render_preview(title: str, body_html: str) -> str:
     )
 
 
+_SUGGEST_FIG_RE = re.compile(r"<figure[^>]*\bvma-suggest\b[^>]*>.*?</figure>", re.I | re.S)
+_SPLIT_SEC_RE = re.compile(r'(<section[^>]*class="[^"]*\bsplit\b[^"]*"[^>]*>)(.*?)(</section>)', re.I | re.S)
+
+
+def _strip_suggestions(body: str) -> str:
+    """Remove any unfilled photo-suggestion placeholders (they must never publish)."""
+    b = _SUGGEST_FIG_RE.sub("", body or "")
+    # A split section that lost its image is no longer a two-column split.
+    def _collapse(m):
+        open_tag, inner, close = m.group(1), m.group(2), m.group(3)
+        if "<figure" in inner.lower():
+            return m.group(0)
+        return re.sub(r'\bsplit\b', "", open_tag, count=1) + inner + close
+    return _SPLIT_SEC_RE.sub(_collapse, b)
+
+
 def render_for_wordpress(body_html: str) -> str:
-    """The exact single `<!-- wp:html -->` block to store as the WordPress post."""
+    """The exact single `<!-- wp:html -->` block to store as the WordPress post.
+    No brand/logo bar (the site header carries the logo), and any unfilled photo
+    suggestions are stripped so they never appear on the live post."""
+    body = _strip_suggestions(body_html)
     return (
         "<!-- wp:html -->\n<style>\n" + BLOG_CSS + "\n</style>\n"
-        + _brand_header() + "\n" + (body_html or "").strip() + "\n<!-- /wp:html -->"
+        + body.strip() + "\n<!-- /wp:html -->"
     )
 
 
