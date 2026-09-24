@@ -95,14 +95,16 @@ def _brand_header() -> str:
 
 
 def render_preview(title: str, body_html: str) -> str:
-    """A standalone HTML document (brand + article + CSS) for the editor iframe."""
+    """A standalone HTML document (just the article + CSS) for the editor iframe.
+    No brand/logo bar — the editor shows the post itself, and the site build
+    strips that bar anyway."""
     safe_title = (title or "Preview").replace("<", "").replace(">", "")
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         f"<title>{safe_title}</title><style>\n"
         + BLOG_CSS + "\nbody{margin:0;background:#fff}\n</style></head><body>"
-        + _brand_header() + "\n" + (body_html or "") + "</body></html>"
+        + (body_html or "") + "</body></html>"
     )
 
 
