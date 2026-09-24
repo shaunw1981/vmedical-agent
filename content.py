@@ -242,6 +242,45 @@ def image_suggestions(body: str) -> list[dict]:
     return out
 
 
+def extract_excerpt(body: str) -> str:
+    """A 1–2 sentence plain-text summary (deck + lead) for the listing / meta description."""
+    body = body or ""
+    ex = ""
+    for m in re.finditer(r"<p[^>]*>(.*?)</p>", body, flags=re.I | re.S):
+        t = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", m.group(1))).strip()
+        if not t:
+            continue
+        ex = (ex + " " + t).strip() if ex else t
+        if len(ex) >= 160:
+            break
+    if len(ex) > 260:
+        ex = ex[:259].rsplit(" ", 1)[0].rstrip(" ,.;:") + "…"
+    return ex
+
+
+_ONE_SUGGEST_RE = re.compile(r"<figure([^>]*)\bvma-suggest\b([^>]*)>(.*?)</figure>", re.I | re.S)
+
+
+def fill_suggestion(body: str, index: int, image_url: str, alt: str) -> Optional[dict]:
+    """
+    Replace the Nth photo-suggestion placeholder with a real image, deterministically
+    (no AI). Keeps the hero class and any caption. Returns {body, is_hero} or None.
+    """
+    figs = list(_ONE_SUGGEST_RE.finditer(body or ""))
+    if index < 0 or index >= len(figs):
+        return None
+    m = figs[index]
+    attrs = (m.group(1) or "") + (m.group(2) or "")
+    is_hero = "hero" in attrs.lower()
+    cap_m = re.search(r"<figcaption.*?</figcaption>", m.group(3) or "", re.I | re.S)
+    cap = cap_m.group(0) if cap_m else ""
+    safe_alt = (alt or "").replace('"', "'").strip()
+    cls = ' class="hero"' if is_hero else ""
+    new_fig = f'<figure{cls}><img src="{image_url}" alt="{safe_alt}">{cap}</figure>'
+    new_body = body[:m.start()] + new_fig + body[m.end():]
+    return {"body": new_body, "is_hero": is_hero}
+
+
 def review(body: str) -> list[str]:
     """Warnings to show before publishing live."""
     warnings: list[str] = []
@@ -318,7 +357,8 @@ def generate(brief: str, title: Optional[str] = None,
         return {"ok": False, "error": "Charlie returned an empty draft — try rephrasing the brief."}
     learned = len(recent_titles)
     return {"ok": True, "body": body, "sources": [h["title"] for h in hits],
-            "learned_from": learned, "title": extract_title(body)}
+            "learned_from": learned, "title": extract_title(body),
+            "excerpt": extract_excerpt(body)}
 
 
 def _learning_context(query: str, exclude_id: Optional[int] = None) -> tuple[str, list[str]]:

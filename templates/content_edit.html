@@ -23,8 +23,12 @@
     <!-- LEFT column -->
     <div style="display:flex;flex-direction:column;gap:1rem;min-width:0">
 
-      <!-- MAIN text form -->
-      <form method="post" style="display:flex;flex-direction:column;gap:1rem">
+      <!-- MAIN form (multipart so image uploads share it) -->
+      <form method="post" enctype="multipart/form-data" id="mainForm" style="display:flex;flex-direction:column;gap:1rem">
+        <input type="file" name="image" id="imgFile" accept="image/*" hidden>
+        <input type="hidden" name="slot" id="imgSlot">
+        <input type="hidden" name="alt" id="imgAlt">
+        <input type="hidden" name="note" id="imgNote">
         <!-- Write with Charlie -->
         <div class="card">
           <h2 style="margin:0 0 .2rem;font-size:1.15rem">✍️ Write with Charlie</h2>
@@ -61,28 +65,45 @@
           </div>
         </div>
 
-        <!-- Post meta, image suggestions, advanced HTML -->
+        <!-- IMAGES: photos + suggested spots (between Write with Charlie and the details) -->
+        {% if wp_ok %}
+        <div class="card">
+          <h2 style="margin:0 0 .5rem;font-size:1.05rem">🖼 Images</h2>
+          {% if suggestions %}
+          <p class="muted" style="font-size:.82rem;margin:.1rem 0 .7rem">Charlie suggested these photos.
+            Copy a prompt to make one in ChatGPT, then add it straight to that spot.</p>
+          <div style="display:flex;flex-direction:column;gap:.55rem">
+            {% for s in suggestions %}
+            <div class="img-sugg" data-desc="{{ s.desc }}" data-slot="{{ loop.index0 }}">
+              <div class="sugg-desc">{{ s.desc }}</div>
+              <div style="display:flex;gap:.35rem;flex-wrap:wrap">
+                <button type="button" class="btn ghost sugg-copy">Copy ChatGPT prompt</button>
+                <button type="button" class="btn secondary sugg-upload">Add photo here</button>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          <div style="margin-top:.7rem">
+            <button type="button" class="btn ghost" id="genUpload">+ Add another photo (Charlie places it)</button>
+          </div>
+          {% else %}
+          <p class="muted" style="font-size:.82rem;margin:.1rem 0 .6rem">Add a photo and Charlie will place it in the best spot.</p>
+          <button type="button" class="btn" id="genUpload">Add a photo</button>
+          {% endif %}
+          {% if post.featured_media_id %}
+          <p class="muted" style="font-size:.82rem;margin:.6rem 0 0">✓ Featured image set (WordPress media #{{ post.featured_media_id }}).</p>
+          {% endif %}
+          <p class="muted" style="font-size:.78rem;margin:.6rem 0 0">Photos upload to the WordPress media library.
+            The hero photo also becomes the featured image.</p>
+        </div>
+        {% endif %}
+
+        <!-- Post details + advanced HTML -->
         <div class="card">
           <textarea name="body" id="bodyField" hidden>{{ post.body or '' }}</textarea>
 
-          {% if suggestions %}
-          <div style="margin:0 0 1rem">
-            <strong style="font-size:.98rem">📷 Image suggestions</strong>
-            <p class="muted" style="font-size:.8rem;margin:.15rem 0 .6rem">Charlie suggested these photos.
-              Copy a ChatGPT prompt to generate one, then add it in the <strong>Images</strong> panel below.</p>
-            <div style="display:flex;flex-direction:column;gap:.5rem">
-              {% for s in suggestions %}
-              <div class="img-sugg" data-desc="{{ s.desc }}">
-                <div class="sugg-desc">{{ s.desc }}</div>
-                <button type="button" class="btn ghost sugg-copy">Copy ChatGPT prompt</button>
-              </div>
-              {% endfor %}
-            </div>
-          </div>
-          {% endif %}
-
           <div class="field-row">
-            <label class="field"><span>Excerpt <span class="muted">(160–260 chars)</span></span>
+            <label class="field"><span>Excerpt <span class="muted">(auto-filled — edit if you like)</span></span>
               <input type="text" name="excerpt" value="{{ post.excerpt or '' }}" placeholder="Short summary for the listing + meta description"></label>
             <label class="field"><span>Status</span>
               <select name="status">
@@ -153,35 +174,6 @@
           {% endif %}
         </div>
       </form>
-
-      <!-- IMAGES (separate multipart form) -->
-      <div class="card">
-        <h2 style="margin:0 0 .5rem;font-size:1.05rem">🖼 Images</h2>
-        {% if wp_ok %}
-        <form method="post" action="/content/{{ post.id }}/upload-image" enctype="multipart/form-data"
-              style="display:flex;flex-direction:column;gap:.6rem">
-          <input type="hidden" name="body" id="imgBody">
-          <label class="field"><span>Choose an image</span>
-            <input type="file" name="image" accept="image/*" required></label>
-          <label class="field"><span>Describe it <span class="muted">(alt text)</span></span>
-            <input type="text" name="alt" placeholder="e.g. Close-up of a calf and athletic shoe on a sunlit path"></label>
-          <label class="field"><span>Placement note <span class="muted">(optional)</span></span>
-            <input type="text" name="note" placeholder="e.g. use as the hero, or near the compression section"></label>
-          <div class="modal-actions" style="justify-content:flex-start">
-            <button class="btn" type="submit" data-kind="image"
-                    data-working="Uploading and placing your image…">Upload &amp; let Charlie place it</button>
-          </div>
-        </form>
-        <p class="muted" style="font-size:.8rem;margin:.6rem 0 0"><strong>Save your draft first.</strong>
-          The image uploads to the WordPress media library and Charlie inserts it where it fits best.
-          The hero image also becomes the post's featured image.</p>
-        {% else %}
-        <p class="muted" style="margin:.1rem 0;font-size:.9rem">Connect WordPress to upload images to its media library.</p>
-        {% endif %}
-        {% if post.featured_media_id %}
-        <p class="muted" style="font-size:.82rem;margin:.5rem 0 0">✓ Featured image set (WordPress media #{{ post.featured_media_id }}).</p>
-        {% endif %}
-      </div>
     </div>
 
     <!-- RIGHT: visual editor -->
@@ -248,9 +240,38 @@
       function syncBodies(){
         var h = currentHTML(); if(h === null) return;
         bodyField.value = h;
-        var ib = document.getElementById('imgBody'); if(ib) ib.value = h;
       }
       document.querySelectorAll('form').forEach(function(f){ f.addEventListener('submit', syncBodies); });
+
+      // Image upload flow: one hidden file input serves the per-spot and general uploads.
+      var imgFile = document.getElementById('imgFile'),
+          imgSlot = document.getElementById('imgSlot'),
+          imgAlt = document.getElementById('imgAlt'),
+          form = document.getElementById('mainForm');
+      function pickImage(slot, alt){
+        if(!imgFile) return;
+        imgSlot.value = (slot === null || slot === undefined) ? '' : slot;
+        imgAlt.value = alt || '';
+        imgFile.value = '';
+        imgFile.click();
+      }
+      if(imgFile){
+        imgFile.addEventListener('change', function(){
+          if(!imgFile.files || !imgFile.files.length) return;
+          syncBodies();
+          if(window.cwStart) window.cwStart('Uploading your photo…', 'image');
+          form.setAttribute('action', '/content/{{ post.id }}/upload-image');
+          form.submit();
+        });
+      }
+      document.querySelectorAll('.sugg-upload').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var row = btn.closest('.img-sugg');
+          pickImage(row ? row.getAttribute('data-slot') : '', row ? row.getAttribute('data-desc') : '');
+        });
+      });
+      var genUpload = document.getElementById('genUpload');
+      if(genUpload) genUpload.addEventListener('click', function(){ pickImage('', ''); });
       // formatting toolbar
       document.querySelectorAll('.ed-toolbar [data-cmd]').forEach(function(btn){
         btn.addEventListener('click', function(){
@@ -370,6 +391,7 @@
         timers.push(setTimeout(hide, 180000));
       }
       function hide(){ overlay.classList.remove('on'); timers.forEach(clearInterval); timers.forEach(clearTimeout); timers = []; }
+      window.cwStart = start;  // let the image-upload flow trigger the overlay too
       document.querySelectorAll('form').forEach(function(f){
         f.addEventListener('submit', function(e){
           var b = e.submitter || document.activeElement;

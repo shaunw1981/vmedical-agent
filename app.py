@@ -48,7 +48,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.20.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.21.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1286,11 +1286,13 @@ def content_generate(request: Request, post_id: int,
     existing = body if refine == "1" and body.strip() else None
     out = content_svc.generate(brief=brief, title=title, existing=existing, exclude_id=post_id)
     if out["ok"]:
-        fields = {"body": out["body"], "status": "draft"}
-        # Fill the title (and slug) from the drafted headline when the user hasn't set one.
-        if not title.strip() and out.get("title"):
+        fields = {"body": out["body"], "brief": brief.strip(), "status": "draft"}
+        # Fill title/slug/excerpt from the draft when the user hasn't set them.
+        if not (title.strip() or post.get("title")) and out.get("title"):
             fields["title"] = out["title"]
             fields["slug"] = content_svc.slugify(out["title"])
+        if not post.get("excerpt") and out.get("excerpt"):
+            fields["excerpt"] = out["excerpt"]
         db.update_blog_post(post_id, **fields)
         srcs = (" · grounded in: " + ", ".join(out["sources"])) if out.get("sources") else ""
         learned = out.get("learned_from") or 0
@@ -1306,7 +1308,8 @@ def content_generate(request: Request, post_id: int,
 @app.post("/content/{post_id}/upload-image")
 async def content_upload_image(request: Request, post_id: int,
                                image: UploadFile = File(...), alt: str = Form(""),
-                               note: str = Form(""), body: str = Form(None)):
+                               note: str = Form(""), slot: str = Form(""),
+                               body: str = Form(None)):
     user, resp = _guard(request, "use_content")
     if resp:
         return resp
@@ -1340,25 +1343,34 @@ async def content_upload_image(request: Request, post_id: int,
     except Exception as exc:  # noqa: BLE001
         return flash(False, f"Upload failed: {exc}")
 
-    # Ask Charlie to place it in the article (if there's a draft to place it in).
-    placed_msg = f"Image uploaded to WordPress. URL: {up['source_url']}"
-    if (post.get("body") or "").strip():
-        res = content_svc.place_image(post["body"], up["source_url"], alt.strip(),
+    cur_body = post.get("body") or ""
+    # A specific spot was chosen — fill that placeholder exactly (no AI, no guessing).
+    slot_idx = None
+    if slot.strip().isdigit():
+        slot_idx = int(slot.strip())
+    if slot_idx is not None:
+        res = content_svc.fill_suggestion(cur_body, slot_idx, up["source_url"], alt.strip())
+        if res:
+            db.update_blog_post(post_id, body=res["body"])
+            if res["is_hero"]:
+                db.set_blog_featured(post_id, up["id"])
+                return flash(True, "Image added to the hero spot (also set as the featured image).")
+            return flash(True, "Image added to that spot. Save-refresh the preview to see it.")
+        # Placeholder no longer there — fall through to AI placement.
+
+    if cur_body.strip():
+        res = content_svc.place_image(cur_body, up["source_url"], alt.strip(),
                                       note=(note.strip() or None))
         if res["ok"]:
             db.update_blog_post(post_id, body=res["body"])
             if content_svc.image_in_hero(res["body"], up["source_url"]):
                 db.set_blog_featured(post_id, up["id"])
-                placed_msg = "Image uploaded and placed by Charlie as the hero (set as the featured image)."
-            else:
-                placed_msg = "Image uploaded and placed by Charlie in the best-fitting section. Save-refresh the preview to see it."
-        else:
-            placed_msg = (f"Image uploaded ({up['source_url']}). {res['error']}")
-    else:
-        # No article yet — remember it as the featured image for later.
-        db.set_blog_featured(post_id, up["id"])
-        placed_msg += " · saved as the featured image. Draft the article, then I'll place it."
-    return flash(True, placed_msg)
+                return flash(True, "Image uploaded and placed by Charlie as the hero (set as the featured image).")
+            return flash(True, "Image uploaded and placed by Charlie in the best-fitting spot. Save-refresh the preview to see it.")
+        return flash(True, f"Image uploaded ({up['source_url']}). {res['error']}")
+
+    db.set_blog_featured(post_id, up["id"])
+    return flash(True, "Image uploaded and saved as the featured image. Draft the article, then add it to a spot.")
 
 
 @app.get("/content/{post_id}/preview", response_class=HTMLResponse)
