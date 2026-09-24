@@ -48,7 +48,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.17.1")
+app = FastAPI(title="vmedical-agent dashboard", version="4.18.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1246,6 +1246,7 @@ def content_edit(request: Request, post_id: int):
              categories=categories, warnings=content_svc.review(post.get("body") or ""),
              learned=len([p for p in db.list_published_posts(20) if p["id"] != post_id]),
              content_engine=config.content_engine_label(),
+             suggestions=content_svc.image_suggestions(post.get("body") or ""),
              flash=request.session.pop("content_flash", None)),
     )
 
@@ -1285,7 +1286,12 @@ def content_generate(request: Request, post_id: int,
     existing = body if refine == "1" and body.strip() else None
     out = content_svc.generate(brief=brief, title=title, existing=existing, exclude_id=post_id)
     if out["ok"]:
-        db.update_blog_post(post_id, body=out["body"], status="draft")
+        fields = {"body": out["body"], "status": "draft"}
+        # Fill the title (and slug) from the drafted headline when the user hasn't set one.
+        if not title.strip() and out.get("title"):
+            fields["title"] = out["title"]
+            fields["slug"] = content_svc.slugify(out["title"])
+        db.update_blog_post(post_id, **fields)
         srcs = (" · grounded in: " + ", ".join(out["sources"])) if out.get("sources") else ""
         learned = out.get("learned_from") or 0
         learn = f" · learned from {learned} published post(s)" if learned else ""

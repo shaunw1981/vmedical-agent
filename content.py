@@ -71,6 +71,10 @@ BLOG_CSS = """@import url('https://fonts.googleapis.com/css2?family=Figtree:wght
 .vma-calf-blog .closing{font-family:var(--serif);font-style:italic;font-size:23px;color:var(--deep)}
 .vma-calf-blog .sources{display:none}
 .vma-calf-blog a{color:var(--deep);text-underline-offset:3px}
+.vma-calf-blog .vma-suggest{display:flex;align-items:center;justify-content:center;text-align:center;background:var(--tint);border:1.5px dashed #9fae90;color:#5E6B51;font-family:var(--body);font-size:.92rem;line-height:1.5;padding:24px}
+.vma-calf-blog .hero.vma-suggest{aspect-ratio:1.95}
+.vma-calf-blog .split .vma-suggest{aspect-ratio:1.25}
+.vma-calf-blog .vma-suggest::before{content:"Suggested photo: " attr(data-suggest)}
 @media(max-width:760px){.vma-calf-blog .intro{padding:32px 22px 20px}.vma-calf-blog h1{font-size:40px;letter-spacing:-1px}.vma-calf-blog .dek{font-size:21px}.vma-calf-blog .hero img{aspect-ratio:1.4;object-position:60% 50%}.vma-calf-blog .hero figcaption{padding:12px 22px}.vma-calf-blog .benefits{grid-template-columns:1fr;margin:10px 22px 34px;gap:20px;padding:25px}.vma-calf-blog .split{grid-template-columns:1fr;margin:35px 22px;padding:20px;gap:15px}.vma-calf-blog h2{font-size:28px}.vma-calf-blog .pull{font-size:26px}.vma-calf-blog{font-size:17px}}
 .vma-calf-brand{max-width:1048px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;padding:26px 0;border-bottom:1px solid #E2DED6;font:11px/1.7 "Figtree","Helvetica Neue",Arial,sans-serif;color:#5E6157;letter-spacing:1px}.vma-calf-brand img{width:310px;max-width:100%;height:auto}.vma-calf-brand span{margin-left:20px}@media(max-width:760px){.vma-calf-brand{margin:0 22px}.vma-calf-brand img{width:250px}.vma-calf-brand span{display:none}}"""
 
@@ -122,14 +126,14 @@ order (everything except the intro is optional):
 
 <article class="vma-calf-blog">
   <div class="intro"><div class="label">Two-part kicker · like this</div><h1>A headline of six to ten words<br><em>broken onto a second line.</em></h1><p class="dek">One-sentence deck that frames the piece.</p></div>
-  <figure class="hero"><img src="https://cms.vmedical.ca/wp-content/uploads/REPLACE-hero.jpg" alt="Describe the image"><figcaption>A one-sentence caption that adds something the picture does not say.</figcaption></figure>
+  <figure class="hero vma-suggest" data-suggest="a short plain description of the ideal hero photo"><figcaption>A one-sentence caption that adds something the picture does not say.</figcaption></figure>
   <div class="benefits"><div><strong>Word</strong><span>One short sentence.</span></div><div><strong>Word</strong><span>One short sentence.</span></div><div><strong>Word</strong><span>One short sentence.</span></div></div>
   <div class="article">
     <p class="lead">An opening lead paragraph, larger and teal.</p>
     <section><h2>A section heading</h2><p>…</p><div class="pull">A short pull-quote line.<br>A second line.</div></section>
     <section><h2>Another section</h2><p>…</p></section>
   </div>
-  <section class="split"><figure><img src="https://cms.vmedical.ca/wp-content/uploads/REPLACE-feature.jpg" alt="Describe"><figcaption>Caption.</figcaption></figure><div><div class="label">SMALL LABEL</div><h2>A feature<br>call-out.</h2><p>…</p></div></section>
+  <section class="split"><figure class="vma-suggest" data-suggest="a short description of the feature photo"><figcaption>Caption.</figcaption></figure><div><div class="label">SMALL LABEL</div><h2>A feature<br>call-out.</h2><p>…</p></div></section>
   <div class="article">
     <section><h2>A checklist section</h2><ol class="steps"><li><strong>Do this.</strong> One sentence of detail.</li></ol></section>
   </div>
@@ -143,7 +147,10 @@ Notes on the blocks:
 - .split closes the reading column and a new <div class="article"> reopens it after.
 
 Rules (follow strictly):
-- Every image src is an absolute https://cms.vmedical.ca/wp-content/uploads/… URL with descriptive alt text. If you do not have a real uploaded image, use https://cms.vmedical.ca/wp-content/uploads/REPLACE-hero.jpg (or REPLACE-feature.jpg) as a placeholder for the team to swap. NEVER use a relative path, and never invent a real-looking URL.
+- Do NOT insert any <img> tags or image URLs. Where a photo belongs, output an EMPTY placeholder figure that DESCRIBES the ideal photo, and the team adds the real image later:
+    Hero: <figure class="hero vma-suggest" data-suggest="short plain description of the ideal photo, no quotes"><figcaption>…</figcaption></figure>
+    In a split/section: <figure class="vma-suggest" data-suggest="short description"><figcaption>…</figcaption></figure>
+  Keep data-suggest to a short plain-text description (no quotation marks, no HTML). Use one hero and, at most, one or two more.
 - No logo bar, no second <h1>, no inline style="" attributes.
 - Canadian spelling. Do NOT use em dashes anywhere: use commas, colons or full stops.
 - Write "Dr" with no full stop.
@@ -194,17 +201,34 @@ def slugify(text: str) -> str:
     return t[:80] or "post"
 
 
+def extract_title(body: str) -> str:
+    """The headline text from the article's <h1> (joining its two lines)."""
+    m = re.search(r"<h1[^>]*>(.*?)</h1>", body or "", flags=re.I | re.S)
+    if not m:
+        return ""
+    inner = re.sub(r"(?i)<br\s*/?>", " ", m.group(1))
+    text = re.sub(r"<[^>]+>", "", inner)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def image_suggestions(body: str) -> list[dict]:
+    """The photo ideas Charlie left in the article (from data-suggest placeholders)."""
+    out = []
+    for d in re.findall(r'data-suggest="([^"]*)"', body or "", flags=re.I):
+        d = d.strip()
+        if d:
+            out.append({"desc": d})
+    return out
+
+
 def review(body: str) -> list[str]:
-    """
-    Warnings to show before publishing live, per the site's format doc:
-    unreplaced/relative images and em dashes (the house style forbids them).
-    """
+    """Warnings to show before publishing live."""
     warnings: list[str] = []
     body = body or ""
+    if "vma-suggest" in body:
+        warnings.append("Some photo spots are still empty suggestions — add the images "
+                        "before publishing, or they'll show as placeholder boxes.")
     srcs = re.findall(r'<img[^>]+src="([^"]*)"', body, flags=re.I)
-    if any("REPLACE" in s for s in srcs):
-        warnings.append("Some images are still placeholders (REPLACE-…) — swap in real "
-                        "https://cms.vmedical.ca/wp-content/uploads/… URLs first.")
     if any(not s.lower().startswith("https://") for s in srcs):
         warnings.append("Some image paths aren't absolute https URLs — the site can't fetch "
                         "relative paths and they'll 404 on the live site.")
@@ -272,7 +296,8 @@ def generate(brief: str, title: Optional[str] = None,
     if not body:
         return {"ok": False, "error": "Charlie returned an empty draft — try rephrasing the brief."}
     learned = len(recent_titles)
-    return {"ok": True, "body": body, "sources": [h["title"] for h in hits], "learned_from": learned}
+    return {"ok": True, "body": body, "sources": [h["title"] for h in hits],
+            "learned_from": learned, "title": extract_title(body)}
 
 
 def _learning_context(query: str, exclude_id: Optional[int] = None) -> tuple[str, list[str]]:
@@ -299,19 +324,20 @@ def _learning_context(query: str, exclude_id: Optional[int] = None) -> tuple[str
 # --- AI image placement ------------------------------------------------------
 _PLACE_SYSTEM = """You are editing an existing Valley Medical blog article written in the fixed house
 style (the outer element is <article class="vma-calf-blog">). You will be given the
-article and one image to add. Insert the image at the SINGLE best location and
-return the FULL updated article and nothing else.
+article and one image to add. Return the FULL updated article and nothing else.
 
 Placement rules:
-- If the article has no <figure class="hero"> yet, add the image as the hero,
-  immediately after the <div class="intro">…</div>:
-  <figure class="hero"><img src="URL" alt="ALT"><figcaption>One helpful sentence.</figcaption></figure>
-- Otherwise place it where it best supports the nearby text: either a
+- If the article has empty placeholder figures (class contains "vma-suggest", with a
+  data-suggest description), REPLACE the single most relevant one with a real figure,
+  removing the vma-suggest class and the data-suggest attribute:
+    <figure class="hero"><img src="URL" alt="ALT"><figcaption>keep or improve the caption</figcaption></figure>
+  (use class "hero" if the placeholder was the hero; otherwise a plain <figure>).
+- If there are no placeholders, add it where it best supports the nearby text: a
   <figure><img src="URL" alt="ALT"><figcaption>…</figcaption></figure> inside the most
-  relevant <section>, or as a <section class="split"> feature between body columns.
+  relevant <section>, or as a <section class="split"> feature.
 - Use the exact image URL and alt text given. Write a short, specific <figcaption>.
-- Do NOT change, add or remove any of the article's existing words. Only insert the
-  image markup. Return ONLY the <article>…</article>, no markdown, no commentary."""
+- Do NOT change, add or remove any of the article's existing words. Only swap the image
+  in. Return ONLY the <article>…</article>, no markdown, no commentary."""
 
 
 def place_image(body: str, image_url: str, alt: str,

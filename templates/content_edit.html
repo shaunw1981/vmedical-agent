@@ -61,15 +61,27 @@
           </div>
         </div>
 
-        <!-- Body + meta -->
+        <!-- Post meta, image suggestions, advanced HTML -->
         <div class="card">
-          <label class="field"><span>Post body <span class="muted">(HTML — the article)</span></span>
-            <textarea name="body" rows="16" spellcheck="false"
-              style="font-family:ui-monospace,Menlo,monospace;font-size:.82rem;line-height:1.5">{{ post.body or '' }}</textarea></label>
-          <p class="muted" style="font-size:.8rem;margin:.4rem 0 0">Add photos in the <strong>Images</strong>
-            panel below — save first, then Charlie places them for you.</p>
+          <textarea name="body" id="bodyField" hidden>{{ post.body or '' }}</textarea>
 
-          <div class="field-row" style="margin-top:.8rem">
+          {% if suggestions %}
+          <div style="margin:0 0 1rem">
+            <strong style="font-size:.98rem">📷 Image suggestions</strong>
+            <p class="muted" style="font-size:.8rem;margin:.15rem 0 .6rem">Charlie suggested these photos.
+              Copy a ChatGPT prompt to generate one, then add it in the <strong>Images</strong> panel below.</p>
+            <div style="display:flex;flex-direction:column;gap:.5rem">
+              {% for s in suggestions %}
+              <div class="img-sugg" data-desc="{{ s.desc }}">
+                <div class="sugg-desc">{{ s.desc }}</div>
+                <button type="button" class="btn ghost sugg-copy">Copy ChatGPT prompt</button>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+
+          <div class="field-row">
             <label class="field"><span>Excerpt <span class="muted">(160–260 chars)</span></span>
               <input type="text" name="excerpt" value="{{ post.excerpt or '' }}" placeholder="Short summary for the listing + meta description"></label>
             <label class="field"><span>Status</span>
@@ -96,6 +108,16 @@
                     style="color:var(--danger,#b42318)"
                     onclick="return confirm('Delete this draft from the dashboard? (It won\\'t remove anything already in WordPress.)')">Delete</button>
           </div>
+
+          <details style="margin-top:.9rem">
+            <summary class="muted" style="cursor:pointer;font-size:.85rem">Advanced: edit HTML source</summary>
+            <textarea id="htmlSource" rows="12" spellcheck="false"
+              style="font-family:ui-monospace,Menlo,monospace;font-size:.8rem;margin-top:.5rem"></textarea>
+            <div class="modal-actions" style="justify-content:flex-start;gap:.5rem;margin-top:.4rem">
+              <button type="button" class="btn secondary" id="showHtml">Show current HTML</button>
+              <button type="button" class="btn" id="applyHtml">Apply to editor</button>
+            </div>
+          </details>
         </div>
 
         <!-- Push to WordPress -->
@@ -138,6 +160,7 @@
         {% if wp_ok %}
         <form method="post" action="/content/{{ post.id }}/upload-image" enctype="multipart/form-data"
               style="display:flex;flex-direction:column;gap:.6rem">
+          <input type="hidden" name="body" id="imgBody">
           <label class="field"><span>Choose an image</span>
             <input type="file" name="image" accept="image/*" required></label>
           <label class="field"><span>Describe it <span class="muted">(alt text)</span></span>
@@ -161,15 +184,21 @@
       </div>
     </div>
 
-    <!-- RIGHT: live preview -->
+    <!-- RIGHT: visual editor -->
     <div class="card" style="position:sticky;top:1rem">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
-        <strong style="font-size:.95rem">Live preview</strong>
-        <a class="btn ghost" href="/content/{{ post.id }}/preview" target="_blank" rel="noopener">Open ↗</a>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem;gap:.5rem;flex-wrap:wrap">
+        <strong style="font-size:.95rem">Edit the post</strong>
+        <div class="ed-toolbar" style="display:flex;gap:.3rem">
+          <button type="button" class="btn ghost" data-cmd="bold" title="Bold"><b>B</b></button>
+          <button type="button" class="btn ghost" data-cmd="italic" title="Italic"><i>I</i></button>
+          <button type="button" class="btn ghost" data-cmd="createLink" title="Add link">🔗</button>
+          <a class="btn ghost" href="/content/{{ post.id }}/preview" target="_blank" rel="noopener" title="Open in a new tab">↗</a>
+        </div>
       </div>
-      <p class="muted" style="font-size:.8rem;margin:0 0 .6rem">Reflects the last <strong>saved</strong> version — Save to refresh.</p>
-      <iframe src="/content/{{ post.id }}/preview" title="Preview"
-              style="width:100%;height:70vh;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe>
+      <p class="muted" style="font-size:.8rem;margin:0 0 .6rem">Click any text below and type to edit it.
+        Changes are kept when you press <strong>Save</strong>.</p>
+      <iframe id="editorFrame" src="/content/{{ post.id }}/preview" title="Editor"
+              style="width:100%;height:74vh;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe>
     </div>
   </div>
 
@@ -182,7 +211,86 @@
       border-radius:6px;background:var(--surface,#fff);color:inherit;font-size:.95rem }
     .content-editor .field-row{ display:flex;gap:.8rem;flex-wrap:wrap }
     .content-editor .field-row .field{ flex:1;min-width:180px }
+    .img-sugg{ display:flex;gap:.6rem;align-items:center;justify-content:space-between;
+      background:var(--surface-2,#eef1ef);border:1px solid var(--line);border-radius:8px;padding:.55rem .7rem }
+    .img-sugg .sugg-desc{ flex:1;min-width:0;font-size:.9rem }
+    .img-sugg .sugg-copy{ white-space:nowrap;flex:none }
+    .ed-toolbar .btn{ padding:.3rem .55rem;font-size:.9rem;line-height:1 }
   </style>
+
+  <script>
+    // Visual editor: the styled post is editable in place; edits sync into the
+    // hidden body field on submit. Plus an Advanced HTML round-trip.
+    (function(){
+      var frame = document.getElementById('editorFrame');
+      var bodyField = document.getElementById('bodyField');
+      if(!frame || !bodyField) return;
+      function articleEl(){ try { return frame.contentDocument.querySelector('article.vma-calf-blog'); } catch(e){ return null; } }
+      function setupEditable(){
+        var doc; try { doc = frame.contentDocument; } catch(e){ return; }
+        var art = articleEl(); if(!art) return;
+        art.setAttribute('contenteditable','true');
+        art.style.caretColor = '#5E6B51';
+        if(doc && !doc.getElementById('cw-edit-style')){
+          var s = doc.createElement('style'); s.id='cw-edit-style';
+          s.textContent = 'article.vma-calf-blog{outline:none}[contenteditable]:focus{outline:none}.vma-calf-blog ::selection{background:#d9e0cd}';
+          doc.head.appendChild(s);
+        }
+      }
+      frame.addEventListener('load', setupEditable);
+      function currentHTML(){
+        var art = articleEl(); if(!art) return null;
+        var c = art.cloneNode(true);
+        c.removeAttribute('contenteditable');
+        c.querySelectorAll('[contenteditable]').forEach(function(n){ n.removeAttribute('contenteditable'); });
+        return c.outerHTML;
+      }
+      function syncBodies(){
+        var h = currentHTML(); if(h === null) return;
+        bodyField.value = h;
+        var ib = document.getElementById('imgBody'); if(ib) ib.value = h;
+      }
+      document.querySelectorAll('form').forEach(function(f){ f.addEventListener('submit', syncBodies); });
+      // formatting toolbar
+      document.querySelectorAll('.ed-toolbar [data-cmd]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var cmd = btn.getAttribute('data-cmd'); var win = frame.contentWindow, art = articleEl();
+          if(!win || !art) return;
+          if(art.focus) art.focus();
+          if(cmd === 'createLink'){ var u = prompt('Link URL:'); if(!u) return; win.document.execCommand('createLink', false, u); }
+          else { win.document.execCommand(cmd, false, null); }
+        });
+      });
+      // advanced HTML round-trip
+      var showBtn = document.getElementById('showHtml'), applyBtn = document.getElementById('applyHtml'),
+          src = document.getElementById('htmlSource');
+      if(showBtn) showBtn.addEventListener('click', function(){ var h = currentHTML(); if(h !== null) src.value = h; });
+      if(applyBtn) applyBtn.addEventListener('click', function(){
+        var art = articleEl(); if(!art || !src.value.trim()) return;
+        art.outerHTML = src.value; setupEditable();
+      });
+    })();
+
+    // Image suggestions: build a ready-to-paste ChatGPT image prompt.
+    (function(){
+      function promptFor(desc){
+        return 'Create a professional editorial photograph for a vein and skin care medical clinic blog. '
+          + 'Subject: ' + desc + '. '
+          + 'Style: natural warm light, calm and reassuring, realistic, high detail, shallow depth of field, '
+          + 'muted olive and cream tones. Landscape 16:9. No text, no logos, no watermarks.';
+      }
+      document.querySelectorAll('.sugg-copy').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var row = btn.closest('.img-sugg'); var desc = row ? row.getAttribute('data-desc') : '';
+          var text = promptFor(desc);
+          function done(){ var o = btn.textContent; btn.textContent = 'Copied ✓'; setTimeout(function(){ btn.textContent = o; }, 1600); }
+          if(navigator.clipboard && navigator.clipboard.writeText){
+            navigator.clipboard.writeText(text).then(done, function(){ window.prompt('Copy this prompt:', text); });
+          } else { window.prompt('Copy this prompt:', text); }
+        });
+      });
+    })();
+  </script>
 
   <!-- Working overlay: shows while Charlie / WordPress is busy so it never looks stalled -->
   <div id="cw-overlay" aria-hidden="true">
