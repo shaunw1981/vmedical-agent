@@ -49,6 +49,9 @@
     {% if can(user.role, 'use_content') %}
     <a class="nav-link {{ 'active' if nav_current == 'content' }}" href="/content">Content</a>
     {% endif %}
+    {% if can(user.role, 'manage_knowledge') %}
+    <a class="nav-link {{ 'active' if nav_current == 'knowledge' }}" href="/knowledge">Knowledge</a>
+    {% endif %}
     {% if can(user.role, 'manage_users') %}
     <a class="nav-link {{ 'active' if nav_current == 'team' }}" href="/admin/users">Team</a>
     {% endif %}

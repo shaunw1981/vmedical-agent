@@ -219,3 +219,110 @@ def find_client_notes(query: str, limit: int = 20) -> list[dict]:
             if len(hits) >= limit:
                 break
     return hits
+
+
+# --- Charlie's knowledge base (managed in the dashboard, stored in the vault) --
+# Notes live at <vault>/<subfolder>/Charlie/Knowledge/*.md and the personality at
+# Charlie/Persona.md. Charlie's retrieval scans the whole subfolder, so anything
+# saved here is referenceable on Charlie's very next answer.
+_PERSONA_SEED = Path(__file__).parent / "charlie_persona.md"
+
+
+def _brain_dir() -> Optional[Path]:
+    return (Path(VAULT_PATH) / SUBFOLDER / "Charlie") if VAULT_PATH else None
+
+
+def _knowledge_dir() -> Optional[Path]:
+    b = _brain_dir()
+    return (b / "Knowledge") if b else None
+
+
+def _knowledge_filename(name: str) -> str:
+    """A safe '<Title>.md' filename from a user-supplied note name."""
+    stem = (name or "").strip()
+    if stem.lower().endswith(".md"):
+        stem = stem[:-3]
+    stem = _safe(stem)[:80] or "Untitled"
+    return f"{stem}.md"
+
+
+def list_knowledge() -> list[dict]:
+    """Knowledge notes (name, title, size, modified), alphabetical."""
+    d = _knowledge_dir()
+    if not d or not d.exists():
+        return []
+    out: list[dict] = []
+    for p in sorted(d.glob("*.md")):
+        try:
+            st = p.stat()
+            out.append({"name": p.name, "title": p.stem, "bytes": st.st_size,
+                        "modified": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")})
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def read_knowledge(name: str) -> Optional[str]:
+    d = _knowledge_dir()
+    if not d:
+        return None
+    p = d / _knowledge_filename(name)
+    try:
+        return p.read_text(encoding="utf-8") if p.exists() else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def write_knowledge(name: str, content: str) -> Optional[str]:
+    """Create or overwrite a knowledge note. Returns the filename, or None if no vault."""
+    d = _knowledge_dir()
+    if not d:
+        return None
+    d.mkdir(parents=True, exist_ok=True)
+    fname = _knowledge_filename(name)
+    (d / fname).write_text(content or "", encoding="utf-8")
+    return fname
+
+
+def delete_knowledge(name: str) -> bool:
+    d = _knowledge_dir()
+    if not d:
+        return False
+    p = d / _knowledge_filename(name)
+    if p.exists():
+        p.unlink()
+        return True
+    return False
+
+
+def _persona_path() -> Optional[Path]:
+    b = _brain_dir()
+    return (b / "Persona.md") if b else None
+
+
+def read_persona() -> dict:
+    """Charlie's personality text + where it came from (vault / repo-seed / default)."""
+    p = _persona_path()
+    if p and p.exists():
+        try:
+            text = p.read_text(encoding="utf-8")
+            if text.strip():
+                return {"text": text, "source": "vault"}
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        text = _PERSONA_SEED.read_text(encoding="utf-8")
+        if text.strip():
+            return {"text": text, "source": "repo-seed"}
+    except Exception:  # noqa: BLE001
+        pass
+    return {"text": "", "source": "empty"}
+
+
+def write_persona(content: str) -> Optional[str]:
+    p = _persona_path()
+    if not p:
+        return None
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content or "", encoding="utf-8")
+    return str(p)

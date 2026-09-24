@@ -15,6 +15,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import (
@@ -47,7 +48,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.14.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.15.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1443,6 +1444,107 @@ def content_wp_test(request: Request):
     if resp:
         return resp
     return JSONResponse(wordpress.test_connection())
+
+
+# --- Knowledge base (managed here, stored in Obsidian) -----------------------
+@app.get("/knowledge", response_class=HTMLResponse)
+def knowledge_list(request: Request):
+    user, resp = _guard(request, "manage_knowledge")
+    if resp:
+        return resp
+    persona = obsidian.read_persona()
+    return templates.TemplateResponse(
+        "knowledge_list.html",
+        _ctx(request, user, notes=obsidian.list_knowledge(),
+             vault_ok=obsidian.is_configured(), brain_ready=charlie.brain_ready(),
+             persona_source=persona["source"],
+             flash=request.session.pop("kb_flash", None)),
+    )
+
+
+@app.post("/knowledge/setup")
+def knowledge_setup(request: Request):
+    user, resp = _guard(request, "manage_knowledge")
+    if resp:
+        return resp
+    out = charlie.setup_brain()
+    if out.get("ok"):
+        made = ", ".join(out.get("created") or []) or "nothing new"
+        request.session["kb_flash"] = {"ok": True, "msg": f"Knowledge base ready. Created: {made}."}
+    else:
+        request.session["kb_flash"] = {"ok": False, "msg": out.get("error", "Couldn't set up the knowledge base.")}
+    return RedirectResponse("/knowledge", status_code=303)
+
+
+@app.get("/knowledge/edit", response_class=HTMLResponse)
+def knowledge_edit(request: Request, name: str = ""):
+    user, resp = _guard(request, "manage_knowledge")
+    if resp:
+        return resp
+    content_text = obsidian.read_knowledge(name) if name else ""
+    if name and content_text is None:
+        request.session["kb_flash"] = {"ok": False, "msg": "That note wasn't found."}
+        return RedirectResponse("/knowledge", status_code=303)
+    return templates.TemplateResponse(
+        "knowledge_edit.html",
+        _ctx(request, user, mode="note", name=name, title=(name[:-3] if name.endswith(".md") else name),
+             content=content_text or "", vault_ok=obsidian.is_configured(),
+             flash=request.session.pop("kb_flash", None)),
+    )
+
+
+@app.post("/knowledge/save")
+def knowledge_save(request: Request, name: str = Form(...), content: str = Form("")):
+    user, resp = _guard(request, "manage_knowledge")
+    if resp:
+        return resp
+    if not obsidian.is_configured():
+        request.session["kb_flash"] = {"ok": False, "msg": "The Obsidian vault isn't set up (set OBSIDIAN_VAULT_PATH)."}
+        return RedirectResponse("/knowledge", status_code=303)
+    if not name.strip():
+        request.session["kb_flash"] = {"ok": False, "msg": "Give the note a name."}
+        return RedirectResponse("/knowledge/edit", status_code=303)
+    fname = obsidian.write_knowledge(name, content)
+    request.session["kb_flash"] = {"ok": True, "msg": f"Saved “{fname}”. Charlie will use it on its next answer."}
+    return RedirectResponse(f"/knowledge/edit?name={quote(fname)}", status_code=303)
+
+
+@app.post("/knowledge/delete")
+def knowledge_delete(request: Request, name: str = Form(...)):
+    user, resp = _guard(request, "manage_knowledge")
+    if resp:
+        return resp
+    ok = obsidian.delete_knowledge(name)
+    request.session["kb_flash"] = {"ok": ok, "msg": (f"Deleted “{name}”." if ok else "That note wasn't found.")}
+    return RedirectResponse("/knowledge", status_code=303)
+
+
+@app.get("/knowledge/persona", response_class=HTMLResponse)
+def knowledge_persona(request: Request):
+    user, resp = _guard(request, "manage_knowledge")
+    if resp:
+        return resp
+    persona = obsidian.read_persona()
+    return templates.TemplateResponse(
+        "knowledge_edit.html",
+        _ctx(request, user, mode="persona", name="Persona.md", title="Charlie's personality",
+             content=persona["text"], persona_source=persona["source"],
+             vault_ok=obsidian.is_configured(),
+             flash=request.session.pop("kb_flash", None)),
+    )
+
+
+@app.post("/knowledge/persona/save")
+def knowledge_persona_save(request: Request, content: str = Form("")):
+    user, resp = _guard(request, "manage_knowledge")
+    if resp:
+        return resp
+    if not obsidian.is_configured():
+        request.session["kb_flash"] = {"ok": False, "msg": "The Obsidian vault isn't set up (set OBSIDIAN_VAULT_PATH)."}
+        return RedirectResponse("/knowledge", status_code=303)
+    obsidian.write_persona(content)
+    request.session["kb_flash"] = {"ok": True, "msg": "Charlie's personality saved. It applies on the next answer."}
+    return RedirectResponse("/knowledge/persona", status_code=303)
 
 
 # --- Team management (Super Admin / Spa Manager) -----------------------------

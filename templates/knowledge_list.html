@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Knowledge · Spa Dashboard{% endblock %}
+{% block nav %}knowledge{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1 style="margin:0">Knowledge base</h1>
+    <div class="filters">
+      <a class="btn ghost" href="/knowledge/persona">Charlie's personality</a>
+      {% if vault_ok %}
+      <a class="btn" href="/knowledge/edit">+ New note</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  <div class="card">
+    <p class="muted" style="margin:.2rem 0">This is what <strong>Charlie</strong> knows — services,
+      pricing, policies, FAQs, post-care and anything else you add. It lives in your Obsidian vault
+      (<code>Charlie/Knowledge</code>), so you can edit it here or in Obsidian, and Charlie uses it on
+      its very next answer.</p>
+  </div>
+
+  {% if not vault_ok %}
+    <div class="banner" style="background:#fff7ed;border-color:#fed7aa;color:#9a3412">
+      The Obsidian vault isn't connected yet. Set <code>OBSIDIAN_VAULT_PATH</code> in <code>.env</code>
+      and restart, then set up the knowledge base here.
+    </div>
+  {% elif not brain_ready %}
+    <div class="card">
+      <p style="margin:.2rem 0 .8rem">Charlie's knowledge folder hasn't been created yet. Set it up to
+        seed starter notes (Services, Pricing &amp; Policies, FAQ, Post-Care, Booking &amp; Contact).</p>
+      <form method="post" action="/knowledge/setup">
+        <button class="btn" type="submit">Set up the knowledge base</button>
+      </form>
+    </div>
+  {% elif not notes %}
+    <div class="card"><p class="muted" style="margin:.2rem 0">No notes yet.
+      Add one with <strong>+ New note</strong>.</p></div>
+  {% else %}
+    {% for n in notes %}
+    <div class="msg-card">
+      <div class="msg-head">
+        <div class="msg-who">
+          <div class="avatar">{{ (n.title or '?')[0]|upper }}</div>
+          <div>
+            <div class="name"><a href="/knowledge/edit?name={{ n.name|urlencode }}">{{ n.title }}</a></div>
+            <div class="meta">Updated {{ (n.modified or '').replace('T',' ') }} · {{ n.bytes }} bytes</div>
+          </div>
+        </div>
+        <div class="msg-actions">
+          <a class="btn secondary" href="/knowledge/edit?name={{ n.name|urlencode }}">Edit</a>
+          <form method="post" action="/knowledge/delete" style="display:inline"
+                onsubmit="return confirm('Delete “{{ n.title|e }}” from Charlie\'s knowledge?');">
+            <input type="hidden" name="name" value="{{ n.name }}">
+            <button class="btn ghost" type="submit" style="color:var(--danger,#b42318)">Delete</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  {% endif %}
+{% endblock %}

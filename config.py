@@ -316,6 +316,7 @@ DEFAULT_ROLE = "team_member"
 #   use_inbox         - see and act on Charlie's conversation inbox (drafts,
 #                       hand-offs): send a reply, direct Charlie, or take over
 #   use_content       - draft blog posts with Charlie and push them to WordPress
+#   manage_knowledge  - edit Charlie's knowledge base + personality (Obsidian)
 ROLE_CAPABILITIES = {
     "super_admin": {
         "view_messages",
@@ -331,6 +332,7 @@ ROLE_CAPABILITIES = {
         "manage_meetings",
         "use_inbox",
         "use_content",
+        "manage_knowledge",
     },
     "spa_manager": {
         "view_messages",
@@ -345,6 +347,7 @@ ROLE_CAPABILITIES = {
         "manage_meetings",
         "use_inbox",
         "use_content",
+        "manage_knowledge",
     },
     "team_member": {
         "view_messages",

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ title or 'New note' }} · Knowledge{% endblock %}
+{% block nav %}knowledge{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1 style="margin:0"><a href="/knowledge" class="muted" style="text-decoration:none">Knowledge</a> ›
+      {{ title or 'New note' }}</h1>
+  </div>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  {% if mode == 'persona' %}
+  <div class="card">
+    <p class="muted" style="margin:.2rem 0 0">This is <strong>who Charlie is</strong> and how it speaks —
+      warm, professional, Maritime hospitality. Edit it to tune the personality.
+      {% if persona_source == 'repo-seed' %}<br>You're editing the built-in starter text; saving stores your
+      own copy in the vault.{% elif persona_source == 'empty' %}<br>No personality file yet; saving creates one.{% endif %}</p>
+  </div>
+  <form method="post" action="/knowledge/persona/save" class="kb-form">
+    <div class="card">
+      <label class="field"><span>Charlie's personality (Markdown)</span>
+        <textarea name="content" rows="20" spellcheck="true">{{ content }}</textarea></label>
+      <div class="modal-actions" style="justify-content:space-between;margin-top:1rem">
+        <button class="btn" type="submit">Save personality</button>
+        <a class="btn ghost" href="/knowledge">Cancel</a>
+      </div>
+    </div>
+  </form>
+  {% else %}
+  <form method="post" action="/knowledge/save" class="kb-form">
+    <div class="card">
+      <label class="field"><span>Note name</span>
+        <input type="text" name="name" value="{{ title }}" placeholder="e.g. Sclerotherapy aftercare"
+               {{ 'readonly' if name }}>
+        {% if name %}<span class="muted" style="font-size:.8rem">Renaming isn't supported here — delete and
+          re-create to rename.</span>{% endif %}</label>
+
+      <label class="field" style="margin-top:.9rem"><span>Content (Markdown)</span>
+        <textarea name="content" rows="20" spellcheck="true"
+          placeholder="# Topic&#10;&#10;Write what Charlie should know. One topic per note works best — services, pricing, a policy, an FAQ, post-care instructions…">{{ content }}</textarea></label>
+
+      <div class="modal-actions" style="justify-content:space-between;margin-top:1rem">
+        <button class="btn" type="submit">Save note</button>
+        <a class="btn ghost" href="/knowledge">Cancel</a>
+      </div>
+    </div>
+  </form>
+  {% endif %}
+
+  <p class="muted" style="font-size:.82rem;margin:.8rem 0 0">Saved to your Obsidian vault. Charlie reads the
+    whole vault, so changes apply to its next answer — no restart needed.</p>
+
+  <style>
+    .kb-form .field{ display:flex;flex-direction:column;gap:.3rem }
+    .kb-form .field > span{ font-size:.82rem;font-weight:600;color:var(--muted) }
+    .kb-form input, .kb-form textarea{ width:100%;box-sizing:border-box;padding:.55rem .7rem;
+      border:1px solid var(--line);border-radius:6px;background:var(--surface,#fff);color:inherit;font-size:.95rem }
+    .kb-form textarea{ font-family:ui-monospace,Menlo,monospace;font-size:.86rem;line-height:1.55 }
+    .kb-form input[readonly]{ background:var(--surface-2,#f3f3f3);color:var(--muted) }
+  </style>
+{% endblock %}
