@@ -237,13 +237,35 @@ def _knowledge_dir() -> Optional[Path]:
     return (b / "Knowledge") if b else None
 
 
-def _knowledge_filename(name: str) -> str:
-    """A safe '<Title>.md' filename from a user-supplied note name."""
-    stem = (name or "").strip()
-    if stem.lower().endswith(".md"):
-        stem = stem[:-3]
-    stem = _safe(stem)[:80] or "Untitled"
-    return f"{stem}.md"
+def _knowledge_filename(name: str) -> Optional[str]:
+    """
+    Resolve a user-supplied note name to a safe '<name>.md' filename. Preserves
+    ordinary characters (spaces, '&', '-') so existing notes like
+    'Pricing & Policies.md' resolve correctly; only strips path separators and
+    filesystem-illegal characters so a name can't escape the Knowledge folder.
+    """
+    raw = (name or "").strip()
+    if raw.lower().endswith(".md"):
+        raw = raw[:-3]
+    raw = os.path.basename(raw).strip().lstrip(".")   # no directories, no leading dots
+    raw = re.sub(r'[\\/:*?"<>|]', "", raw).strip()     # drop filesystem-illegal chars
+    raw = raw[:120].strip()
+    return f"{raw}.md" if raw else None
+
+
+def _resolve_knowledge(name: str) -> Optional[Path]:
+    """The Path to a note, only if it stays inside the Knowledge folder."""
+    d = _knowledge_dir()
+    fname = _knowledge_filename(name)
+    if not d or not fname:
+        return None
+    p = (d / fname)
+    try:
+        if p.resolve().parent != d.resolve():
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    return p
 
 
 def list_knowledge() -> list[dict]:
@@ -263,10 +285,9 @@ def list_knowledge() -> list[dict]:
 
 
 def read_knowledge(name: str) -> Optional[str]:
-    d = _knowledge_dir()
-    if not d:
+    p = _resolve_knowledge(name)
+    if not p:
         return None
-    p = d / _knowledge_filename(name)
     try:
         return p.read_text(encoding="utf-8") if p.exists() else None
     except Exception:  # noqa: BLE001
@@ -278,18 +299,17 @@ def write_knowledge(name: str, content: str) -> Optional[str]:
     d = _knowledge_dir()
     if not d:
         return None
-    d.mkdir(parents=True, exist_ok=True)
     fname = _knowledge_filename(name)
+    if not fname:
+        return None
+    d.mkdir(parents=True, exist_ok=True)
     (d / fname).write_text(content or "", encoding="utf-8")
     return fname
 
 
 def delete_knowledge(name: str) -> bool:
-    d = _knowledge_dir()
-    if not d:
-        return False
-    p = d / _knowledge_filename(name)
-    if p.exists():
+    p = _resolve_knowledge(name)
+    if p and p.exists():
         p.unlink()
         return True
     return False
