@@ -78,9 +78,15 @@ _DEFAULT_LOGO = "images/valley-medical-logo.png"
 
 
 def _brand_header() -> str:
-    logo = config.WORDPRESS_LOGO_URL or _DEFAULT_LOGO
-    return (f'<div class="vma-calf-brand"><img src="{logo}" '
-            'alt="Valley Medical — Veins Skin Move">'
+    logo = (config.WORDPRESS_LOGO_URL or "").strip()
+    if logo:
+        mark = f'<img src="{logo}" alt="Valley Medical — Veins Skin Move">'
+    else:
+        # No logo URL configured — show a text wordmark instead of a broken image.
+        # (The site build strips this brand bar anyway; it's only a preview aid.)
+        mark = ('<strong style="font-family:\'Newsreader\',Georgia,serif;font-size:23px;'
+                'font-weight:500;letter-spacing:.02em;color:#2A2B27">Valley Medical</strong>')
+    return (f'<div class="vma-calf-brand">{mark}'
             '<span>LEG HEALTH<br>EVERYDAY WELLBEING</span></div>')
 
 
