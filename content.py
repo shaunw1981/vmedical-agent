@@ -28,6 +28,7 @@ from typing import Optional
 
 import charlie
 import config
+import db
 
 # --- The fixed house-style CSS (scoped to .vma-calf-blog / .vma-calf-brand) ---
 # Re-skinned to the site's approved olive/cream palette (site.css tokens) and its
@@ -210,7 +211,8 @@ def review(body: str) -> list[str]:
 
 
 def generate(brief: str, title: Optional[str] = None,
-             existing: Optional[str] = None, provider: Optional[str] = None) -> dict:
+             existing: Optional[str] = None, provider: Optional[str] = None,
+             exclude_id: Optional[int] = None) -> dict:
     """
     Draft (or refine) a post body in the house style from a brief. Returns
     {"ok": bool, "body"|"error": str, "sources": [titles]}.
@@ -224,6 +226,7 @@ def generate(brief: str, title: Optional[str] = None,
 
     hits = charlie.retrieve(brief or (title or ""))
     context = charlie._build_context(hits, brief or (title or ""))
+    exemplar, recent_titles = _learning_context(brief or (title or ""), exclude_id)
 
     parts = []
     if title:
@@ -233,6 +236,13 @@ def generate(brief: str, title: Optional[str] = None,
         parts.append("Here is the current draft to revise (keep what works, "
                      "improve clarity and structure, keep the same house style):\n"
                      + existing)
+    if exemplar:
+        parts.append("Here is one of Valley Medical's own PUBLISHED posts. Match its voice, "
+                     "rhythm and structure, but write a completely fresh piece — do not copy "
+                     "its wording or topic:\n" + exemplar)
+    if recent_titles:
+        parts.append("Recently published (do NOT repeat these topics): "
+                     + "; ".join(recent_titles))
     user = "\n\n".join(parts)
 
     try:
@@ -243,4 +253,72 @@ def generate(brief: str, title: Optional[str] = None,
     body = _clean_article(text)
     if not body:
         return {"ok": False, "error": "Charlie returned an empty draft — try rephrasing the brief."}
-    return {"ok": True, "body": body, "sources": [h["title"] for h in hits]}
+    learned = len(recent_titles)
+    return {"ok": True, "body": body, "sources": [h["title"] for h in hits], "learned_from": learned}
+
+
+def _learning_context(query: str, exclude_id: Optional[int] = None) -> tuple[str, list[str]]:
+    """
+    Charlie's 'always learning' corpus: the most relevant previously published
+    post as a voice exemplar, plus recent titles to avoid repeating topics.
+    """
+    posts = [p for p in db.list_published_posts(20)
+             if p.get("id") != exclude_id and (p.get("body") or "").strip()]
+    if not posts:
+        return "", []
+    terms = set(charlie._terms(query or ""))
+
+    def score(p: dict) -> int:
+        hay = f"{p.get('title','')} {p.get('brief','')} {p.get('excerpt','')}".lower()
+        return sum(hay.count(t) for t in terms)
+
+    best = max(posts, key=score) if terms else posts[0]
+    exemplar = (best.get("body") or "")[:2800]
+    titles = [p.get("title") for p in posts[:8] if p.get("title")]
+    return exemplar, titles
+
+
+# --- AI image placement ------------------------------------------------------
+_PLACE_SYSTEM = """You are editing an existing Valley Medical blog article written in the fixed house
+style (the outer element is <article class="vma-calf-blog">). You will be given the
+article and one image to add. Insert the image at the SINGLE best location and
+return the FULL updated article and nothing else.
+
+Placement rules:
+- If the article has no <figure class="hero"> yet, add the image as the hero,
+  immediately after the <div class="intro">…</div>:
+  <figure class="hero"><img src="URL" alt="ALT"><figcaption>One helpful sentence.</figcaption></figure>
+- Otherwise place it where it best supports the nearby text: either a
+  <figure><img src="URL" alt="ALT"><figcaption>…</figcaption></figure> inside the most
+  relevant <section>, or as a <section class="split"> feature between body columns.
+- Use the exact image URL and alt text given. Write a short, specific <figcaption>.
+- Do NOT change, add or remove any of the article's existing words. Only insert the
+  image markup. Return ONLY the <article>…</article>, no markdown, no commentary."""
+
+
+def place_image(body: str, image_url: str, alt: str,
+                note: Optional[str] = None, provider: Optional[str] = None) -> dict:
+    """Ask Charlie to insert an uploaded image at the best spot. Returns {ok, body|error}."""
+    if not (body or "").strip():
+        return {"ok": False, "error": "Write the draft first, then add images."}
+    if not config.charlie_enabled():
+        return {"ok": False, "error": "Charlie isn't connected."}
+    user = (f"Image URL: {image_url}\nAlt text: {alt or '(none given)'}\n"
+            + (f"Note about the image: {note}\n" if note else "")
+            + "\nArticle to edit:\n" + body)
+    try:
+        text = charlie.chat_once(_PLACE_SYSTEM, user, provider)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"Charlie couldn't place the image: {exc}"}
+    new_body = _clean_article(text)
+    if not new_body or image_url not in new_body:
+        return {"ok": False, "error": "Charlie didn't return a usable placement — "
+                "you can paste the image into the body manually."}
+    return {"ok": True, "body": new_body}
+
+
+def image_in_hero(body: str, image_url: str) -> bool:
+    """True if the image URL sits inside the <figure class="hero"> block."""
+    m = re.search(r"<figure[^>]*class=['\"][^'\"]*hero[^'\"]*['\"][^>]*>.*?</figure>",
+                  body or "", flags=re.I | re.S)
+    return bool(m and image_url in m.group(0))

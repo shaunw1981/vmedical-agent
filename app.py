@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -47,7 +47,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.13.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.14.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1243,6 +1243,7 @@ def content_edit(request: Request, post_id: int):
         _ctx(request, user, post=post, statuses=_CONTENT_STATUSES,
              wp_ok=wordpress.enabled(), charlie_ok=config.charlie_enabled(),
              categories=categories, warnings=content_svc.review(post.get("body") or ""),
+             learned=len([p for p in db.list_published_posts(20) if p["id"] != post_id]),
              flash=request.session.pop("content_flash", None)),
     )
 
@@ -1280,15 +1281,76 @@ def content_generate(request: Request, post_id: int,
     # Save the latest title/brief/body first so nothing is lost by the round-trip.
     db.update_blog_post(post_id, title=title.strip(), brief=brief.strip(), body=body)
     existing = body if refine == "1" and body.strip() else None
-    out = content_svc.generate(brief=brief, title=title, existing=existing)
+    out = content_svc.generate(brief=brief, title=title, existing=existing, exclude_id=post_id)
     if out["ok"]:
         db.update_blog_post(post_id, body=out["body"], status="draft")
         srcs = (" · grounded in: " + ", ".join(out["sources"])) if out.get("sources") else ""
+        learned = out.get("learned_from") or 0
+        learn = f" · learned from {learned} published post(s)" if learned else ""
         request.session["content_flash"] = {"ok": True,
-            "msg": ("Charlie revised the draft." if existing else "Charlie drafted the post.") + srcs}
+            "msg": ("Charlie revised the draft." if existing else "Charlie drafted the post.")
+                   + srcs + learn}
     else:
         request.session["content_flash"] = {"ok": False, "msg": out["error"]}
     return RedirectResponse(f"/content/{post_id}", status_code=303)
+
+
+@app.post("/content/{post_id}/upload-image")
+async def content_upload_image(request: Request, post_id: int,
+                               image: UploadFile = File(...), alt: str = Form(""),
+                               note: str = Form(""), body: str = Form(None)):
+    user, resp = _guard(request, "use_content")
+    if resp:
+        return resp
+    post = db.get_blog_post(post_id)
+    if not post:
+        return RedirectResponse("/content", status_code=303)
+
+    def flash(ok, msg):
+        request.session["content_flash"] = {"ok": ok, "msg": msg}
+        return RedirectResponse(f"/content/{post_id}", status_code=303)
+
+    if not wordpress.enabled():
+        return flash(False, "Connect WordPress first — images upload to its media library.")
+    # Persist current edits so placement runs against what's on screen.
+    if body is not None:
+        db.update_blog_post(post_id, body=body)
+        post = db.get_blog_post(post_id)
+
+    data = await image.read()
+    if not data:
+        return flash(False, "That image was empty.")
+    if len(data) > 15 * 1024 * 1024:
+        return flash(False, "That image is over 15 MB — please use a smaller file.")
+    fname = (image.filename or "image.jpg").replace('"', "")
+    mime = image.content_type or "image/jpeg"
+    if not mime.startswith("image/"):
+        return flash(False, "Please upload an image file.")
+
+    try:
+        up = wordpress.upload_media(data, fname, mime, alt=alt.strip() or None)
+    except Exception as exc:  # noqa: BLE001
+        return flash(False, f"Upload failed: {exc}")
+
+    # Ask Charlie to place it in the article (if there's a draft to place it in).
+    placed_msg = f"Image uploaded to WordPress. URL: {up['source_url']}"
+    if (post.get("body") or "").strip():
+        res = content_svc.place_image(post["body"], up["source_url"], alt.strip(),
+                                      note=(note.strip() or None))
+        if res["ok"]:
+            db.update_blog_post(post_id, body=res["body"])
+            if content_svc.image_in_hero(res["body"], up["source_url"]):
+                db.set_blog_featured(post_id, up["id"])
+                placed_msg = "Image uploaded and placed by Charlie as the hero (set as the featured image)."
+            else:
+                placed_msg = "Image uploaded and placed by Charlie in the best-fitting section. Save-refresh the preview to see it."
+        else:
+            placed_msg = (f"Image uploaded ({up['source_url']}). {res['error']}")
+    else:
+        # No article yet — remember it as the featured image for later.
+        db.set_blog_featured(post_id, up["id"])
+        placed_msg += " · saved as the featured image. Draft the article, then I'll place it."
+    return flash(True, placed_msg)
 
 
 @app.get("/content/{post_id}/preview", response_class=HTMLResponse)
@@ -1349,6 +1411,7 @@ def content_push(request: Request, post_id: int, wp_status: str = Form("draft"),
             title=post.get("title") or "(untitled)", content_html=wp_html,
             status=wp_status, excerpt=(post.get("excerpt") or None),
             slug=(post.get("slug") or None), category_id=(post.get("category_id") or None),
+            featured_media=(post.get("featured_media_id") or None),
             post_id=(post.get("wp_post_id") or None))
     except Exception as exc:  # noqa: BLE001
         return flash(False, f"WordPress push failed: {exc}")

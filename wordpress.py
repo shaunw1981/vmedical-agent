@@ -88,9 +88,39 @@ def list_categories() -> list[dict]:
     return []
 
 
+def upload_media(content_bytes: bytes, filename: str, mime: str,
+                 alt: Optional[str] = None) -> dict:
+    """
+    Upload an image to the WordPress media library. Returns
+    {"id", "source_url"} — source_url is the absolute URL to use in a post.
+    """
+    if not enabled():
+        raise RuntimeError("WordPress isn't configured.")
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Type": mime or "application/octet-stream",
+    }
+    with httpx.Client(timeout=60) as client:
+        r = client.post(_api("/media"), auth=_auth(), headers=headers, content=content_bytes)
+    data = _handle(r)
+    media_id = data.get("id")
+    source_url = data.get("source_url") or data.get("guid", {}).get("rendered", "")
+    # Set alt text (best-effort) so the post keeps meaningful alt attributes.
+    if media_id and alt:
+        try:
+            with httpx.Client(timeout=20) as client:
+                client.post(_api(f"/media/{media_id}"), auth=_auth(), json={"alt_text": alt})
+        except Exception:  # noqa: BLE001
+            pass
+    if not media_id or not source_url:
+        raise RuntimeError(f"WordPress did not return a usable media record: {str(data)[:200]}")
+    return {"id": str(media_id), "source_url": source_url}
+
+
 def create_or_update_post(title: str, content_html: str, status: str,
                           excerpt: Optional[str] = None, slug: Optional[str] = None,
                           category_id: Optional[str] = None,
+                          featured_media: Optional[str] = None,
                           post_id: Optional[str] = None) -> dict:
     """
     Create a new post, or update an existing one when post_id is given. `status`
@@ -109,6 +139,11 @@ def create_or_update_post(title: str, content_html: str, status: str,
     if category_id:
         try:
             body["categories"] = [int(category_id)]
+        except (ValueError, TypeError):
+            pass
+    if featured_media:
+        try:
+            body["featured_media"] = int(featured_media)
         except (ValueError, TypeError):
             pass
     if config.WORDPRESS_DEFAULT_AUTHOR:

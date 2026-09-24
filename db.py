@@ -186,6 +186,7 @@ def init_db() -> None:
                 excerpt       TEXT,
                 tags          TEXT,            -- comma-separated
                 category_id   TEXT,            -- WordPress category id
+                featured_media_id TEXT,        -- WordPress media id for the hero/featured image
                 status        TEXT NOT NULL DEFAULT 'idea',
                                  -- idea|drafting|draft|ready|published
                 wp_post_id    TEXT,            -- WordPress post id once pushed
@@ -209,6 +210,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE blog_posts ADD COLUMN slug TEXT")
         if blog_cols and "category_id" not in blog_cols:
             conn.execute("ALTER TABLE blog_posts ADD COLUMN category_id TEXT")
+        if blog_cols and "featured_media_id" not in blog_cols:
+            conn.execute("ALTER TABLE blog_posts ADD COLUMN featured_media_id TEXT")
         appt_cols = {row["name"] for row in conn.execute("PRAGMA table_info(appointments)")}
         if appt_cols and "ghl_appointment_id" not in appt_cols:
             conn.execute("ALTER TABLE appointments ADD COLUMN ghl_appointment_id TEXT")
@@ -481,6 +484,21 @@ def set_blog_wp(post_id: int, wp_post_id: str, wp_link: str, wp_status: str,
 def delete_blog_post(post_id: int) -> None:
     with _connect() as conn:
         conn.execute("DELETE FROM blog_posts WHERE id = ?", (post_id,))
+
+
+def set_blog_featured(post_id: int, media_id: str) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE blog_posts SET featured_media_id = ?, updated_at = ? WHERE id = ?",
+                     (media_id, datetime.now().isoformat(timespec="seconds"), post_id))
+
+
+def list_published_posts(limit: int = 20) -> list[dict]:
+    """Previously published posts — Charlie's living style corpus, newest first."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM blog_posts WHERE status = 'published' OR wp_status = 'publish' "
+            "ORDER BY updated_at DESC, id DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
 
 
 # --- Settings (small key/value store, e.g. reminder workflow mapping) --------

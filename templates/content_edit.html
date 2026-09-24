@@ -18,101 +18,139 @@
   <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
   {% endif %}
 
-  <form method="post" class="content-editor"
-        style="display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;align-items:start">
+  <div class="content-editor" style="display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;align-items:start">
 
-    <!-- LEFT: editor -->
+    <!-- LEFT column -->
     <div style="display:flex;flex-direction:column;gap:1rem;min-width:0">
-      <div class="card">
-        <label class="field"><span>Title</span>
-          <input type="text" name="title" value="{{ post.title or '' }}" placeholder="Post title"></label>
 
-        <label class="field" style="margin-top:.6rem"><span>Slug <span class="muted">— /blog/&lt;slug&gt;.html (blank = from title)</span></span>
-          <input type="text" name="slug" value="{{ post.slug or '' }}" placeholder="how-walking-helps-veins"></label>
+      <!-- MAIN text form -->
+      <form method="post" style="display:flex;flex-direction:column;gap:1rem">
+        <!-- Write with Charlie -->
+        <div class="card">
+          <h2 style="margin:0 0 .2rem;font-size:1.15rem">✍️ Write with Charlie</h2>
+          <p class="muted" style="margin:.1rem 0 .8rem;font-size:.86rem">Tell Charlie what to write.
+            It drafts in Valley Medical's house style, grounded in your knowledge base{% if learned %},
+            and learns from your <strong>{{ learned }}</strong> published post(s) to keep the voice
+            consistent{% endif %}. Always review before publishing.</p>
 
-        <label class="field" style="margin-top:.8rem"><span>Brief for Charlie
-          <span class="muted">— topic, angle, key points</span></span>
-          <textarea name="brief" rows="4"
-            placeholder="e.g. Why walking + compression help vein health; warm, patient-friendly; include a 'when to seek care' note.">{{ post.brief or '' }}</textarea></label>
+          <label class="field"><span>What should this post be about?</span>
+            <textarea name="brief" rows="{{ 6 if not post.body else 3 }}" {% if not post.body %}autofocus{% endif %}
+              placeholder="e.g. Why walking and compression help vein health. Warm and patient-friendly; explain the calf-muscle pump; include a 'when to seek care' note.">{{ post.brief or '' }}</textarea></label>
 
-        <div class="modal-actions" style="justify-content:flex-start;margin-top:.7rem;gap:.5rem;flex-wrap:wrap">
-          {% if charlie_ok %}
-          <button class="btn" type="submit" formaction="/content/{{ post.id }}/generate"
-                  name="refine" value="0">✍️ Draft with Charlie</button>
-          {% if post.body %}
-          <button class="btn secondary" type="submit" formaction="/content/{{ post.id }}/generate"
-                  name="refine" value="1">↻ Refine current draft</button>
-          {% endif %}
-          {% else %}
-          <span class="muted">Connect Charlie (an engine) to draft automatically.</span>
-          {% endif %}
+          <div class="modal-actions" style="justify-content:flex-start;margin-top:.7rem;gap:.5rem;flex-wrap:wrap">
+            {% if charlie_ok %}
+            <button class="btn" type="submit" formaction="/content/{{ post.id }}/generate"
+                    name="refine" value="0">{{ 'Draft with Charlie' if not post.body else 'Re-draft from brief' }}</button>
+            {% if post.body %}
+            <button class="btn secondary" type="submit" formaction="/content/{{ post.id }}/generate"
+                    name="refine" value="1">↻ Refine current draft</button>
+            {% endif %}
+            {% else %}
+            <span class="muted">Connect Charlie (an engine) to draft automatically.</span>
+            {% endif %}
+          </div>
+
+          <div class="field-row" style="margin-top:.9rem">
+            <label class="field"><span>Title</span>
+              <input type="text" name="title" value="{{ post.title or '' }}" placeholder="Post title"></label>
+            <label class="field"><span>Slug <span class="muted">(blank = from title)</span></span>
+              <input type="text" name="slug" value="{{ post.slug or '' }}" placeholder="how-walking-helps-veins"></label>
+          </div>
         </div>
-        <p class="muted" style="font-size:.82rem;margin:.5rem 0 0">Charlie writes in Valley
-          Medical's house style, grounded in your knowledge base. Review and edit before publishing.</p>
-      </div>
 
-      <div class="card">
-        <label class="field"><span>Post body <span class="muted">(HTML — the article)</span></span>
-          <textarea name="body" rows="18" spellcheck="false"
-            style="font-family:ui-monospace,Menlo,monospace;font-size:.82rem;line-height:1.5">{{ post.body or '' }}</textarea></label>
+        <!-- Body + meta -->
+        <div class="card">
+          <label class="field"><span>Post body <span class="muted">(HTML — the article)</span></span>
+            <textarea name="body" rows="16" spellcheck="false"
+              style="font-family:ui-monospace,Menlo,monospace;font-size:.82rem;line-height:1.5">{{ post.body or '' }}</textarea></label>
+          <p class="muted" style="font-size:.8rem;margin:.4rem 0 0">Add photos in the <strong>Images</strong>
+            panel below — save first, then Charlie places them for you.</p>
 
-        <div class="field-row" style="margin-top:.8rem">
-          <label class="field"><span>Excerpt <span class="muted">(160–260 chars)</span></span>
-            <input type="text" name="excerpt" value="{{ post.excerpt or '' }}" placeholder="Short summary for the listing + meta description"></label>
-          <label class="field"><span>Status</span>
-            <select name="status">
-              {% for s in statuses %}
-              <option value="{{ s }}" {{ 'selected' if s == post.status }}>{{ s|capitalize }}</option>
+          <div class="field-row" style="margin-top:.8rem">
+            <label class="field"><span>Excerpt <span class="muted">(160–260 chars)</span></span>
+              <input type="text" name="excerpt" value="{{ post.excerpt or '' }}" placeholder="Short summary for the listing + meta description"></label>
+            <label class="field"><span>Status</span>
+              <select name="status">
+                {% for s in statuses %}
+                <option value="{{ s }}" {{ 'selected' if s == post.status }}>{{ s|capitalize }}</option>
+                {% endfor %}
+              </select></label>
+          </div>
+
+          {% if categories %}
+          <label class="field" style="margin-top:.8rem"><span>Category <span class="muted">(WordPress)</span></span>
+            <select name="category_id">
+              <option value="">— none —</option>
+              {% for cat in categories %}
+              <option value="{{ cat.id }}" {{ 'selected' if (post.category_id|string) == (cat.id|string) }}>{{ cat.name }}</option>
               {% endfor %}
             </select></label>
+          {% endif %}
+
+          <div class="modal-actions" style="justify-content:space-between;margin-top:1rem">
+            <button class="btn" type="submit" formaction="/content/{{ post.id }}/save">Save</button>
+            <button class="btn ghost" type="submit" formaction="/content/{{ post.id }}/delete"
+                    style="color:var(--danger,#b42318)"
+                    onclick="return confirm('Delete this draft from the dashboard? (It won\\'t remove anything already in WordPress.)')">Delete</button>
+          </div>
         </div>
 
-        {% if categories %}
-        <label class="field" style="margin-top:.8rem"><span>Category <span class="muted">(WordPress)</span></span>
-          <select name="category_id">
-            <option value="">— none —</option>
-            {% for cat in categories %}
-            <option value="{{ cat.id }}" {{ 'selected' if (post.category_id|string) == (cat.id|string) }}>{{ cat.name }}</option>
-            {% endfor %}
-          </select></label>
-        {% endif %}
-
-        <div class="modal-actions" style="justify-content:space-between;margin-top:1rem">
-          <button class="btn" type="submit" formaction="/content/{{ post.id }}/save">Save</button>
-          <button class="btn ghost" type="submit" formaction="/content/{{ post.id }}/delete"
-                  style="color:var(--danger,#b42318)"
-                  onclick="return confirm('Delete this draft from the dashboard? (It won\\'t remove anything already in WordPress.)')">Delete</button>
+        <!-- Push to WordPress -->
+        <div class="card">
+          <h2 style="margin:0 0 .5rem;font-size:1.05rem">Push to WordPress</h2>
+          {% if warnings %}
+          <div class="banner" style="background:#fff7ed;border-color:#fed7aa;color:#9a3412;margin:.2rem 0 .8rem">
+            <strong>Before publishing:</strong>
+            <ul style="margin:.3rem 0 0;padding-left:1.1rem">
+              {% for w in warnings %}<li>{{ w }}</li>{% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+          {% if post.wp_post_id %}
+          <p class="muted" style="margin:.1rem 0 .7rem;font-size:.9rem">
+            Currently in WordPress as <strong>{{ post.wp_status }}</strong>{% if post.pushed_by %},
+            by {{ post.pushed_by }}{% endif %}. Pushing again updates the same post.</p>
+          {% endif %}
+          {% if wp_ok %}
+          <div class="modal-actions" style="justify-content:flex-start;gap:.6rem;flex-wrap:wrap">
+            <button class="btn secondary" type="submit" formaction="/content/{{ post.id }}/push"
+                    name="wp_status" value="draft">Send as WordPress draft</button>
+            <button class="btn" type="submit" formaction="/content/{{ post.id }}/push"
+                    name="wp_status" value="publish"
+                    onclick="return confirm('Publish live to the website now?')">Publish live</button>
+          </div>
+          {% else %}
+          <p class="muted" style="margin:.1rem 0;font-size:.9rem">WordPress isn't connected yet.
+            Add the credentials to <code>.env</code>, then
+            <a href="/content-wp-test" target="_blank" rel="noopener">test the connection</a>.</p>
+          {% endif %}
         </div>
-      </div>
+      </form>
 
-      <!-- Push to WordPress -->
+      <!-- IMAGES (separate multipart form) -->
       <div class="card">
-        <h2 style="margin:0 0 .5rem;font-size:1.05rem">Push to WordPress</h2>
-        {% if warnings %}
-        <div class="banner" style="background:#fff7ed;border-color:#fed7aa;color:#9a3412;margin:.2rem 0 .8rem">
-          <strong>Before publishing:</strong>
-          <ul style="margin:.3rem 0 0;padding-left:1.1rem">
-            {% for w in warnings %}<li>{{ w }}</li>{% endfor %}
-          </ul>
-        </div>
-        {% endif %}
-        {% if post.wp_post_id %}
-        <p class="muted" style="margin:.1rem 0 .7rem;font-size:.9rem">
-          Currently in WordPress as <strong>{{ post.wp_status }}</strong>{% if post.pushed_by %},
-          by {{ post.pushed_by }}{% endif %}. Pushing again updates the same post.</p>
-        {% endif %}
+        <h2 style="margin:0 0 .5rem;font-size:1.05rem">🖼 Images</h2>
         {% if wp_ok %}
-        <div class="modal-actions" style="justify-content:flex-start;gap:.6rem;flex-wrap:wrap">
-          <button class="btn secondary" type="submit" formaction="/content/{{ post.id }}/push"
-                  name="wp_status" value="draft">Send as WordPress draft</button>
-          <button class="btn" type="submit" formaction="/content/{{ post.id }}/push"
-                  name="wp_status" value="publish"
-                  onclick="return confirm('Publish live to the website now?')">Publish live</button>
-        </div>
+        <form method="post" action="/content/{{ post.id }}/upload-image" enctype="multipart/form-data"
+              style="display:flex;flex-direction:column;gap:.6rem">
+          <label class="field"><span>Choose an image</span>
+            <input type="file" name="image" accept="image/*" required></label>
+          <label class="field"><span>Describe it <span class="muted">(alt text)</span></span>
+            <input type="text" name="alt" placeholder="e.g. Close-up of a calf and athletic shoe on a sunlit path"></label>
+          <label class="field"><span>Placement note <span class="muted">(optional)</span></span>
+            <input type="text" name="note" placeholder="e.g. use as the hero, or near the compression section"></label>
+          <div class="modal-actions" style="justify-content:flex-start">
+            <button class="btn" type="submit">Upload &amp; let Charlie place it</button>
+          </div>
+        </form>
+        <p class="muted" style="font-size:.8rem;margin:.6rem 0 0"><strong>Save your draft first.</strong>
+          The image uploads to the WordPress media library and Charlie inserts it where it fits best.
+          The hero image also becomes the post's featured image.</p>
         {% else %}
-        <p class="muted" style="margin:.1rem 0;font-size:.9rem">WordPress isn't connected yet.
-          Add the credentials to <code>.env</code>, then
-          <a href="/content-wp-test" target="_blank" rel="noopener">test the connection</a>.</p>
+        <p class="muted" style="margin:.1rem 0;font-size:.9rem">Connect WordPress to upload images to its media library.</p>
+        {% endif %}
+        {% if post.featured_media_id %}
+        <p class="muted" style="font-size:.82rem;margin:.5rem 0 0">✓ Featured image set (WordPress media #{{ post.featured_media_id }}).</p>
         {% endif %}
       </div>
     </div>
@@ -127,7 +165,7 @@
       <iframe src="/content/{{ post.id }}/preview" title="Preview"
               style="width:100%;height:70vh;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe>
     </div>
-  </form>
+  </div>
 
   <style>
     @media (max-width:900px){ .content-editor{ grid-template-columns:1fr !important } }
