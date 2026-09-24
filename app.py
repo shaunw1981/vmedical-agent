@@ -32,6 +32,7 @@ import auth
 import charlie
 import charts
 import config
+import content as content_svc
 import db
 import email_monitor
 import ghl
@@ -41,11 +42,12 @@ import mailer
 import meetings as meetings_svc
 import obsidian
 import reminders
+import wordpress
 
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.10.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.11.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1198,6 +1200,172 @@ def respond_web_message(request: Request, web_message_id: int):
         return resp
     db.mark_web_message_responded(web_message_id, user["email"])
     return RedirectResponse("/messages", status_code=303)
+
+
+# --- Content (blog posts → WordPress) ----------------------------------------
+_CONTENT_STATUSES = ["idea", "drafting", "draft", "ready", "published"]
+
+
+@app.get("/content", response_class=HTMLResponse)
+def content_list(request: Request, status: str = "all"):
+    user, resp = _guard(request, "use_content")
+    if resp:
+        return resp
+    status_filter = None if status == "all" else status
+    return templates.TemplateResponse(
+        "content_list.html",
+        _ctx(request, user, posts=db.list_blog_posts(status_filter),
+             active_filter=status, wp_ok=wordpress.enabled(),
+             flash=request.session.pop("content_flash", None)),
+    )
+
+
+@app.post("/content/new")
+def content_new(request: Request):
+    user, resp = _guard(request, "use_content")
+    if resp:
+        return resp
+    pid = db.create_blog_post(user["email"])
+    return RedirectResponse(f"/content/{pid}", status_code=303)
+
+
+@app.get("/content/{post_id}", response_class=HTMLResponse)
+def content_edit(request: Request, post_id: int):
+    user, resp = _guard(request, "use_content")
+    if resp:
+        return resp
+    post = db.get_blog_post(post_id)
+    if not post:
+        return RedirectResponse("/content", status_code=303)
+    return templates.TemplateResponse(
+        "content_edit.html",
+        _ctx(request, user, post=post, statuses=_CONTENT_STATUSES,
+             wp_ok=wordpress.enabled(), charlie_ok=config.charlie_enabled(),
+             flash=request.session.pop("content_flash", None)),
+    )
+
+
+@app.post("/content/{post_id}/save")
+def content_save(request: Request, post_id: int,
+                 title: str = Form(""), brief: str = Form(""), body: str = Form(""),
+                 excerpt: str = Form(""), tags: str = Form(""), status: str = Form("draft")):
+    user, resp = _guard(request, "use_content")
+    if resp:
+        return resp
+    if not db.get_blog_post(post_id):
+        return RedirectResponse("/content", status_code=303)
+    if status not in _CONTENT_STATUSES:
+        status = "draft"
+    db.update_blog_post(post_id, title=title.strip(), brief=brief.strip(),
+                        body=body, excerpt=excerpt.strip(), tags=tags.strip(),
+                        status=status)
+    request.session["content_flash"] = {"ok": True, "msg": "Saved."}
+    return RedirectResponse(f"/content/{post_id}", status_code=303)
+
+
+@app.post("/content/{post_id}/generate")
+def content_generate(request: Request, post_id: int,
+                     title: str = Form(""), brief: str = Form(""),
+                     body: str = Form(""), refine: str = Form("")):
+    user, resp = _guard(request, "use_content")
+    if resp:
+        return resp
+    post = db.get_blog_post(post_id)
+    if not post:
+        return RedirectResponse("/content", status_code=303)
+    # Save the latest title/brief/body first so nothing is lost by the round-trip.
+    db.update_blog_post(post_id, title=title.strip(), brief=brief.strip(), body=body)
+    existing = body if refine == "1" and body.strip() else None
+    out = content_svc.generate(brief=brief, title=title, existing=existing)
+    if out["ok"]:
+        db.update_blog_post(post_id, body=out["body"], status="draft")
+        srcs = (" · grounded in: " + ", ".join(out["sources"])) if out.get("sources") else ""
+        request.session["content_flash"] = {"ok": True,
+            "msg": ("Charlie revised the draft." if existing else "Charlie drafted the post.") + srcs}
+    else:
+        request.session["content_flash"] = {"ok": False, "msg": out["error"]}
+    return RedirectResponse(f"/content/{post_id}", status_code=303)
+
+
+@app.get("/content/{post_id}/preview", response_class=HTMLResponse)
+def content_preview(request: Request, post_id: int):
+    user, resp = _guard(request, "use_content")
+    if resp:
+        return resp
+    post = db.get_blog_post(post_id)
+    if not post:
+        return HTMLResponse("<p>Not found</p>", status_code=404)
+    return HTMLResponse(content_svc.render_preview(post.get("title") or "",
+                                                   post.get("body") or ""))
+
+
+@app.post("/content/{post_id}/push")
+def content_push(request: Request, post_id: int, wp_status: str = Form("draft"),
+                 title: str = Form(None), body: str = Form(None),
+                 excerpt: str = Form(None), brief: str = Form(None),
+                 tags: str = Form(None), status: str = Form(None)):
+    user, resp = _guard(request, "use_content")
+    if resp:
+        return resp
+    post = db.get_blog_post(post_id)
+    if not post:
+        return RedirectResponse("/content", status_code=303)
+
+    def flash(ok, msg):
+        request.session["content_flash"] = {"ok": ok, "msg": msg}
+        return RedirectResponse(f"/content/{post_id}", status_code=303)
+
+    # Save current edits first so what you previewed is exactly what's pushed.
+    edits = {}
+    if title is not None:   edits["title"] = title.strip()
+    if body is not None:    edits["body"] = body
+    if excerpt is not None: edits["excerpt"] = excerpt.strip()
+    if brief is not None:   edits["brief"] = brief.strip()
+    if tags is not None:    edits["tags"] = tags.strip()
+    if edits:
+        db.update_blog_post(post_id, **edits)
+        post = db.get_blog_post(post_id)
+
+    if not wordpress.enabled():
+        return flash(False, "WordPress isn't connected yet (set WORDPRESS_URL / "
+                            "WORDPRESS_USER / WORDPRESS_APP_PASSWORD).")
+    if wp_status not in ("draft", "publish"):
+        wp_status = "draft"
+    if not (post.get("body") or "").strip():
+        return flash(False, "There's no draft to push yet.")
+
+    wp_html = content_svc.render_for_wordpress(post["body"])
+    try:
+        res = wordpress.create_or_update_post(
+            title=post.get("title") or "(untitled)", content_html=wp_html,
+            status=wp_status, excerpt=(post.get("excerpt") or None),
+            post_id=(post.get("wp_post_id") or None))
+    except Exception as exc:  # noqa: BLE001
+        return flash(False, f"WordPress push failed: {exc}")
+
+    blog_status = "published" if wp_status == "publish" else "ready"
+    db.set_blog_wp(post_id, wp_post_id=res["id"], wp_link=res.get("link") or res.get("edit_link", ""),
+                   wp_status=wp_status, pushed_by=user["email"], status=blog_status)
+    where = "published live" if wp_status == "publish" else "sent to WordPress as a draft"
+    return flash(True, f"Post {where}.")
+
+
+@app.post("/content/{post_id}/delete")
+def content_delete(request: Request, post_id: int):
+    user, resp = _guard(request, "use_content")
+    if resp:
+        return resp
+    db.delete_blog_post(post_id)
+    request.session["content_flash"] = {"ok": True, "msg": "Draft deleted."}
+    return RedirectResponse("/content", status_code=303)
+
+
+@app.get("/content-wp-test")
+def content_wp_test(request: Request):
+    user, resp = _guard(request, "use_content")
+    if resp:
+        return resp
+    return JSONResponse(wordpress.test_connection())
 
 
 # --- Team management (Super Admin / Spa Manager) -----------------------------

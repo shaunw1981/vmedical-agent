@@ -235,6 +235,32 @@ GRANOLA_SYNC_DAYS = int(os.environ.get("GRANOLA_SYNC_DAYS", "30") or "30")
 def granola_enabled() -> bool:
     return bool(GRANOLA_API_KEY)
 
+# --- Website / WordPress content ---------------------------------------------
+# The Content section lets the team draft blog posts with Charlie and push them
+# to the WordPress CMS that feeds the (headless) website. Auth uses a WordPress
+# Application Password (Users → Profile → Application Passwords, WP 5.6+): create
+# one for "Valley Medical Dashboard" and paste it below (spaces are fine).
+WORDPRESS_URL = os.environ.get("WORDPRESS_URL", "").strip().rstrip("/")
+WORDPRESS_USER = os.environ.get("WORDPRESS_USER", "").strip()
+WORDPRESS_APP_PASSWORD = os.environ.get("WORDPRESS_APP_PASSWORD", "").strip()
+# Default WordPress author id to attribute posts to (optional; blank = the app
+# password's own user).
+WORDPRESS_DEFAULT_AUTHOR = os.environ.get("WORDPRESS_DEFAULT_AUTHOR", "").strip()
+# Absolute URL of the Valley Medical logo used in the blog template's brand
+# header. Leave blank to use the template's default relative path.
+WORDPRESS_LOGO_URL = os.environ.get("WORDPRESS_LOGO_URL", "").strip()
+
+
+def wordpress_enabled() -> bool:
+    """True once the WordPress URL + credentials are configured."""
+    return bool(WORDPRESS_URL and WORDPRESS_USER and WORDPRESS_APP_PASSWORD)
+
+
+def content_enabled() -> bool:
+    """Content drafting works as long as Charlie has an engine; pushing to the
+    site additionally needs WordPress configured."""
+    return charlie_enabled()
+
 # --- Email monitor (reads the "AI Call Recap" emails) ------------------------
 # The app checks this mailbox on a schedule and turns each new recap email into
 # a dashboard message + Obsidian note. Leave IMAP_USER/IMAP_PASSWORD blank to
@@ -289,6 +315,7 @@ DEFAULT_ROLE = "team_member"
 #   manage_meetings   - sync Granola, confirm a consult to a client, dismiss
 #   use_inbox         - see and act on Charlie's conversation inbox (drafts,
 #                       hand-offs): send a reply, direct Charlie, or take over
+#   use_content       - draft blog posts with Charlie and push them to WordPress
 ROLE_CAPABILITIES = {
     "super_admin": {
         "view_messages",
@@ -303,6 +330,7 @@ ROLE_CAPABILITIES = {
         "view_meetings",
         "manage_meetings",
         "use_inbox",
+        "use_content",
     },
     "spa_manager": {
         "view_messages",
@@ -316,6 +344,7 @@ ROLE_CAPABILITIES = {
         "view_meetings",
         "manage_meetings",
         "use_inbox",
+        "use_content",
     },
     "team_member": {
         "view_messages",
@@ -327,6 +356,7 @@ ROLE_CAPABILITIES = {
         "view_meetings",
         "manage_meetings",  # team members confirm which client a consult belongs to
         "use_inbox",
+        "use_content",
     },
 }
 

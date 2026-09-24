@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Content · Spa Dashboard{% endblock %}
+{% block nav %}content{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1 style="margin:0">Content</h1>
+    <div class="filters">
+      {% for s in ['all','idea','draft','ready','published'] %}
+      <a class="btn {{ 'secondary' if active_filter==s else 'ghost' }}"
+         href="/content?status={{ s }}">{{ s|capitalize }}</a>
+      {% endfor %}
+      <form method="post" action="/content/new" style="display:inline">
+        <button class="btn" type="submit">+ New post</button>
+      </form>
+    </div>
+  </div>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  {% if not wp_ok %}
+  <div class="banner" style="background:#f0f9ff;border-color:#bae6fd;color:#075985">
+    WordPress isn't connected yet, so posts can be drafted but not pushed live.
+    Add <code>WORDPRESS_URL</code>, <code>WORDPRESS_USER</code> and
+    <code>WORDPRESS_APP_PASSWORD</code> to <code>.env</code>.
+  </div>
+  {% endif %}
+
+  {% if not posts %}
+    <div class="card">
+      <p class="muted" style="margin:.2rem 0">No posts yet. Start one with
+        <strong>+ New post</strong> and draft it with Charlie.</p>
+    </div>
+  {% else %}
+    {% for p in posts %}
+    <div class="msg-card">
+      <div class="msg-head">
+        <div class="msg-who">
+          <div class="avatar">{{ (p.title or 'U')[0]|upper }}</div>
+          <div>
+            <div class="name"><a href="/content/{{ p.id }}">{{ p.title or 'Untitled post' }}</a></div>
+            <div class="meta">
+              Updated {{ (p.updated_at or '').replace('T',' ') }}
+              {% if p.created_by %}&nbsp;·&nbsp; {{ p.created_by }}{% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="msg-actions">
+          {% set tagcls = {'published':'responded','ready':'responded','draft':'new','drafting':'new','idea':'new'} %}
+          <span class="tag {{ tagcls.get(p.status,'new') }}">{{ p.status|capitalize }}</span>
+          {% if p.wp_link %}
+          <a class="btn ghost" href="{{ p.wp_link }}" target="_blank" rel="noopener">View in WordPress</a>
+          {% endif %}
+          <a class="btn secondary" href="/content/{{ p.id }}">Open</a>
+        </div>
+      </div>
+      {% if p.brief %}
+      <div class="summary"><span class="summary-label">Brief</span>{{ p.brief[:180] }}{{ '…' if p.brief|length > 180 }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% endif %}
+{% endblock %}

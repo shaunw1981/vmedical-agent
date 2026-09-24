@@ -448,6 +448,16 @@ def _chat_ollama(system: str, messages: list[dict],
     return {"text": text, "tool_calls": calls}
 
 
+def chat_once(system: str, user_text: str, provider: Optional[str] = None) -> str:
+    """
+    Public one-shot completion for other modules (e.g. blog content). Runs on the
+    given provider, or Charlie's default. Returns the model's text.
+    """
+    prov = provider or config.charlie_provider_for("ask")
+    res = _chat(prov, system, [{"role": "user", "content": user_text}])
+    return res["text"]
+
+
 def ollama_status() -> dict:
     """Lightweight reachability + model check for diagnostics (no generation)."""
     out = {"url": config.OLLAMA_URL, "model": config.OLLAMA_MODEL,

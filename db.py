@@ -173,6 +173,25 @@ def init_db() -> None:
                 responded_at  TEXT,
                 dedupe_key    TEXT UNIQUE      -- so a retry/double-submit is ignored
             );
+
+            CREATE TABLE IF NOT EXISTS blog_posts (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT NOT NULL,
+                created_by    TEXT,
+                title         TEXT NOT NULL DEFAULT '',
+                brief         TEXT,            -- the idea/brief the team gave Charlie
+                body          TEXT,            -- the draft (HTML)
+                excerpt       TEXT,
+                tags          TEXT,            -- comma-separated
+                status        TEXT NOT NULL DEFAULT 'idea',
+                                 -- idea|drafting|draft|ready|published
+                wp_post_id    TEXT,            -- WordPress post id once pushed
+                wp_link       TEXT,            -- WordPress permalink/edit link
+                wp_status     TEXT,            -- 'draft' or 'publish' as sent to WP
+                pushed_by     TEXT,
+                pushed_at     TEXT
+            );
             """
         )
         # Lightweight migrations: add columns that newer versions expect, so an
@@ -393,6 +412,68 @@ def mark_web_message_responded(web_message_id: int, responded_by: str) -> None:
             "responded_at = ? WHERE id = ?",
             (responded_by, datetime.now().isoformat(timespec="seconds"), web_message_id),
         )
+
+
+# --- Blog posts (Content section → WordPress) --------------------------------
+_BLOG_FIELDS = {"title", "brief", "body", "excerpt", "tags", "status"}
+
+
+def create_blog_post(created_by: str, title: str = "") -> int:
+    now = datetime.now().isoformat(timespec="seconds")
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO blog_posts (created_at, updated_at, created_by, title, status) "
+            "VALUES (?, ?, ?, ?, 'idea')",
+            (now, now, created_by, title),
+        )
+        return int(cur.lastrowid)
+
+
+def get_blog_post(post_id: int) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM blog_posts WHERE id = ?", (post_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_blog_posts(status: Optional[str] = None) -> list[dict]:
+    query = "SELECT * FROM blog_posts "
+    params: tuple = ()
+    if status:
+        query += "WHERE status = ? "
+        params = (status,)
+    query += "ORDER BY updated_at DESC, id DESC"
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def update_blog_post(post_id: int, **fields) -> None:
+    """Update whitelisted blog fields (title/brief/body/excerpt/tags/status)."""
+    sets = {k: v for k, v in fields.items() if k in _BLOG_FIELDS}
+    if not sets:
+        return
+    sets["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    cols = ", ".join(f"{k} = ?" for k in sets)
+    with _connect() as conn:
+        conn.execute(f"UPDATE blog_posts SET {cols} WHERE id = ?",
+                     (*sets.values(), post_id))
+
+
+def set_blog_wp(post_id: int, wp_post_id: str, wp_link: str, wp_status: str,
+                pushed_by: str, status: str) -> None:
+    """Record a successful push to WordPress and the resulting blog status."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE blog_posts SET wp_post_id = ?, wp_link = ?, wp_status = ?, "
+            "pushed_by = ?, pushed_at = ?, status = ?, updated_at = ? WHERE id = ?",
+            (wp_post_id, wp_link, wp_status, pushed_by,
+             datetime.now().isoformat(timespec="seconds"), status,
+             datetime.now().isoformat(timespec="seconds"), post_id),
+        )
+
+
+def delete_blog_post(post_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM blog_posts WHERE id = ?", (post_id,))
 
 
 # --- Settings (small key/value store, e.g. reminder workflow mapping) --------
