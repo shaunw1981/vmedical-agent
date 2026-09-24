@@ -30,9 +30,48 @@ import charlie
 import config
 
 # --- The fixed house-style CSS (scoped to .vma-calf-blog / .vma-calf-brand) ---
-BLOG_CSS = """.vma-calf-blog{--navy:#1d406f;--teal:#265360;--ink:#283440;--pale:#eef3f4;color:var(--ink);font:19px/1.75 Georgia,serif;max-width:1120px;margin:auto}.vma-calf-blog *{box-sizing:border-box}.vma-calf-blog h1{font-size:64px;line-height:1.06;font-weight:normal;letter-spacing:-2px;color:var(--navy);margin:15px 0 22px}.vma-calf-blog h1 em{font-style:normal;color:var(--teal)}.vma-calf-blog h2{font-size:32px;line-height:1.2;font-weight:normal;color:var(--teal);margin:0 0 20px}.vma-calf-blog p{margin:0 0 22px}.vma-calf-blog .label{font:600 11px/1.6 Arial,sans-serif;text-transform:uppercase;letter-spacing:2.1px;color:var(--teal)}.vma-calf-blog .intro{padding:50px 36px 34px;max-width:900px}.vma-calf-blog .dek{font-size:23px;line-height:1.5;color:#586f80;max-width:690px}.vma-calf-blog figure{margin:0}.vma-calf-blog img{display:block;width:100%;height:auto}.vma-calf-blog .hero img{aspect-ratio:2.2;object-fit:cover;object-position:50% 53%}.vma-calf-blog figcaption{font:12px/1.5 Arial,sans-serif;color:#617786;padding:12px 0}.vma-calf-blog .hero figcaption{padding:12px 36px}.vma-calf-blog .benefits{background:var(--navy);color:white;display:grid;grid-template-columns:repeat(3,1fr);padding:27px 36px;gap:30px;margin:10px 36px 46px}.vma-calf-blog .benefits strong{font-size:24px;font-weight:normal;display:block}.vma-calf-blog .benefits span{font:14px/1.5 Arial,sans-serif;color:#e1e9f0;display:block;margin-top:5px}.vma-calf-blog .article{max-width:760px;margin:0 auto;padding:0 24px}.vma-calf-blog section{margin-bottom:38px}.vma-calf-blog .lead{font-size:23px;color:var(--teal)}.vma-calf-blog .pull{border-left:3px solid #a6bec6;padding-left:24px;font-size:29px;line-height:1.4;color:var(--teal);margin:32px 0}.vma-calf-blog .split{margin:48px 36px;display:grid;grid-template-columns:1.1fr 1fr;align-items:center;background:var(--pale);gap:32px;padding:26px}.vma-calf-blog .split p{font-size:18px}.vma-calf-blog .split p:last-child{margin:0}.vma-calf-blog .steps{padding:0;list-style:none;counter-reset:steps}.vma-calf-blog .steps li{counter-increment:steps;padding:16px 0 16px 48px;position:relative;border-bottom:1px solid #d8e1e6}.vma-calf-blog .steps li:before{content:counter(steps,decimal-leading-zero);position:absolute;left:0;color:var(--teal);font:600 15px/2 Arial,sans-serif}.vma-calf-blog .attention{background:#f3f5f7;border-top:3px solid var(--navy);padding:26px;font-size:16px}.vma-calf-blog .attention h2{font-size:25px}.vma-calf-blog .attention p:last-child{margin:0}.vma-calf-blog .closing{font-size:23px;color:var(--teal)}.vma-calf-blog .sources{font:12px/1.7 Arial,sans-serif;border-top:1px solid #d8e1e6;padding:22px 0 32px;color:#617786}.vma-calf-blog a{color:var(--teal);text-underline-offset:3px}@media(max-width:760px){.vma-calf-blog .intro{padding:32px 22px 20px}.vma-calf-blog h1{font-size:46px}.vma-calf-blog .dek{font-size:21px}.vma-calf-blog .hero img{aspect-ratio:1.4;object-position:67% 50%}.vma-calf-blog .hero figcaption{padding:12px 22px}.vma-calf-blog .benefits{grid-template-columns:1fr;margin:10px 22px 34px;gap:20px;padding:25px}.vma-calf-blog .split{grid-template-columns:1fr;margin:35px 22px;padding:20px;gap:15px}.vma-calf-blog h2{font-size:29px}.vma-calf-blog .pull{font-size:26px}}
-.vma-calf-blog .closing-panel{background:var(--pale);padding:32px;margin:42px 0}.vma-calf-blog .closing-panel p:last-child{margin-bottom:0}.vma-calf-blog .closing-panel .label{margin-bottom:14px}.vma-calf-blog .hero img{aspect-ratio:1.95;object-position:50% 52%}.vma-calf-blog .split img{aspect-ratio:1.25;object-fit:cover;object-position:52% 50%}.vma-calf-blog .sources{display:none}@media(max-width:760px){.vma-calf-blog h1{font-size:42px;letter-spacing:-1.2px}.vma-calf-blog .hero img{aspect-ratio:1.4;object-position:60% 50%}.vma-calf-blog .closing-panel{padding:24px}.vma-calf-blog{font-size:18px}}
-.vma-calf-brand{max-width:1048px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;padding:26px 0;border-bottom:1px solid #d8e1e6;font:11px/1.7 Arial,sans-serif;color:#617786;letter-spacing:1px}.vma-calf-brand img{width:310px;max-width:100%;height:auto}.vma-calf-brand span{margin-left:20px}@media(max-width:760px){.vma-calf-brand{margin:0 22px}.vma-calf-brand img{width:250px}.vma-calf-brand span{display:none}}"""
+# Re-skinned to the site's approved olive/cream palette (site.css tokens) and its
+# Newsreader (headings) + Figtree (body) type. The layout structure is unchanged.
+BLOG_CSS = """@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,200..600;1,6..72,300..500&display=swap');
+.vma-calf-blog{--ink:#2A2B27;--deep:#5E6B51;--accent:#7D8B6E;--band:#2A2B27;--pale:#F3EEE7;--tint:#E7EAE1;--line:#E2DED6;--serif:"Newsreader",Georgia,"Times New Roman",serif;--body:"Figtree","Helvetica Neue",Arial,sans-serif;color:var(--ink);font:400 18px/1.7 var(--body);max-width:1120px;margin:auto}
+.vma-calf-blog *{box-sizing:border-box}
+.vma-calf-blog h1{font-family:var(--serif);font-size:60px;line-height:1.06;font-weight:400;letter-spacing:-1.4px;color:var(--ink);margin:15px 0 22px}
+.vma-calf-blog h1 em{font-style:normal;color:var(--accent)}
+.vma-calf-blog h2{font-family:var(--serif);font-size:32px;line-height:1.2;font-weight:400;color:var(--deep);margin:0 0 20px}
+.vma-calf-blog p{margin:0 0 22px}
+.vma-calf-blog .label{font:600 11px/1.6 var(--body);text-transform:uppercase;letter-spacing:2.1px;color:var(--deep)}
+.vma-calf-blog .intro{padding:50px 36px 34px;max-width:900px}
+.vma-calf-blog .dek{font-family:var(--serif);font-style:italic;font-size:24px;line-height:1.5;color:#5E6157;max-width:690px}
+.vma-calf-blog figure{margin:0}
+.vma-calf-blog img{display:block;width:100%;height:auto}
+.vma-calf-blog .hero img{aspect-ratio:1.95;object-fit:cover;object-position:50% 52%}
+.vma-calf-blog figcaption{font:12px/1.5 var(--body);color:#5E6157;padding:12px 0}
+.vma-calf-blog .hero figcaption{padding:12px 36px}
+.vma-calf-blog .benefits{background:var(--band);color:#fff;display:grid;grid-template-columns:repeat(3,1fr);padding:27px 36px;gap:30px;margin:10px 36px 46px}
+.vma-calf-blog .benefits strong{font-family:var(--serif);font-size:24px;font-weight:400;display:block}
+.vma-calf-blog .benefits span{font:14px/1.5 var(--body);color:var(--tint);display:block;margin-top:5px}
+.vma-calf-blog .article{max-width:760px;margin:0 auto;padding:0 24px}
+.vma-calf-blog section{margin-bottom:38px}
+.vma-calf-blog .lead{font-family:var(--serif);font-style:italic;font-size:23px;color:var(--deep)}
+.vma-calf-blog .pull{border-left:3px solid #C4CDB6;padding-left:24px;font-family:var(--serif);font-style:italic;font-size:29px;line-height:1.4;color:var(--deep);margin:32px 0}
+.vma-calf-blog .split{margin:48px 36px;display:grid;grid-template-columns:1.1fr 1fr;align-items:center;background:var(--pale);gap:32px;padding:26px}
+.vma-calf-blog .split img{aspect-ratio:1.25;object-fit:cover;object-position:52% 50%}
+.vma-calf-blog .split p{font-size:18px}
+.vma-calf-blog .split p:last-child{margin:0}
+.vma-calf-blog .steps{padding:0;list-style:none;counter-reset:steps}
+.vma-calf-blog .steps li{counter-increment:steps;padding:16px 0 16px 48px;position:relative;border-bottom:1px solid var(--line)}
+.vma-calf-blog .steps li:before{content:counter(steps,decimal-leading-zero);position:absolute;left:0;color:var(--deep);font:600 15px/2 var(--body)}
+.vma-calf-blog .attention{background:var(--pale);border-top:3px solid var(--band);padding:26px;font-size:16px}
+.vma-calf-blog .attention h2{font-size:25px}
+.vma-calf-blog .attention p:last-child{margin:0}
+.vma-calf-blog .closing-panel{background:var(--pale);padding:32px;margin:42px 0}
+.vma-calf-blog .closing-panel p:last-child{margin-bottom:0}
+.vma-calf-blog .closing-panel .label{margin-bottom:14px}
+.vma-calf-blog .closing{font-family:var(--serif);font-style:italic;font-size:23px;color:var(--deep)}
+.vma-calf-blog .sources{display:none}
+.vma-calf-blog a{color:var(--deep);text-underline-offset:3px}
+@media(max-width:760px){.vma-calf-blog .intro{padding:32px 22px 20px}.vma-calf-blog h1{font-size:40px;letter-spacing:-1px}.vma-calf-blog .dek{font-size:21px}.vma-calf-blog .hero img{aspect-ratio:1.4;object-position:60% 50%}.vma-calf-blog .hero figcaption{padding:12px 22px}.vma-calf-blog .benefits{grid-template-columns:1fr;margin:10px 22px 34px;gap:20px;padding:25px}.vma-calf-blog .split{grid-template-columns:1fr;margin:35px 22px;padding:20px;gap:15px}.vma-calf-blog h2{font-size:28px}.vma-calf-blog .pull{font-size:26px}.vma-calf-blog{font-size:17px}}
+.vma-calf-brand{max-width:1048px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;padding:26px 0;border-bottom:1px solid #E2DED6;font:11px/1.7 "Figtree","Helvetica Neue",Arial,sans-serif;color:#5E6157;letter-spacing:1px}.vma-calf-brand img{width:310px;max-width:100%;height:auto}.vma-calf-brand span{margin-left:20px}@media(max-width:760px){.vma-calf-brand{margin:0 22px}.vma-calf-brand img{width:250px}.vma-calf-brand span{display:none}}"""
 
 _DEFAULT_LOGO = "images/valley-medical-logo.png"
 
@@ -50,8 +89,8 @@ def render_preview(title: str, body_html: str) -> str:
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        f"<title>{safe_title}</title><style>body{{margin:0;background:#fff}}\n"
-        + BLOG_CSS + "\n</style></head><body>"
+        f"<title>{safe_title}</title><style>\n"
+        + BLOG_CSS + "\nbody{margin:0;background:#fff}\n</style></head><body>"
         + _brand_header() + "\n" + (body_html or "") + "</body></html>"
     )
 
@@ -92,7 +131,7 @@ order (everything except the intro is optional):
 </article>
 
 Notes on the blocks:
-- <em> in the h1 is NOT italic; it colours the second line teal. Exactly one <h1> (in .intro).
+- <em> in the h1 is NOT italic; it sets the second line in the brand accent colour. Exactly one <h1> (in .intro).
 - .benefits has exactly three items. .steps has four to six items, each led by a bolded instruction.
 - .split closes the reading column and a new <div class="article"> reopens it after.
 
