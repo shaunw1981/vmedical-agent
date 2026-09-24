@@ -65,34 +65,47 @@ def render_for_wordpress(body_html: str) -> str:
 
 
 # --- Charlie content generation ----------------------------------------------
-_TEMPLATE_CONTRACT = """You are writing the BODY of a blog post for Valley Medical's website in a fixed
-house style. Output ONLY one HTML block: <article class="vma-calf-blog"> … </article>.
-No markdown, no code fences, no <style>, no <html>/<head>, no commentary — just the
-<article>. Use ONLY these building blocks and class names:
+_TEMPLATE_CONTRACT = """You are writing a patient-education article for Valley Medical, a vein and medical
+aesthetics clinic in Kentville, Nova Scotia and Summerside, PEI. Vein procedures
+are performed by a vascular surgeon.
+
+Output ONLY one HTML block: <article class="vma-calf-blog"> … </article>. No
+markdown, no code fences, no <style>, no <html>/<head>, no commentary, no logo
+bar — just the <article>. Use ONLY these building blocks and class names, in this
+order (everything except the intro is optional):
 
 <article class="vma-calf-blog">
-  <div class="intro"><div class="label">SHORT EYEBROW · CATEGORY</div><h1>Headline that can<br><em>use an accent phrase.</em></h1><p class="dek">One-sentence deck that frames the piece.</p></div>
-  <figure class="hero"><img src="images/REPLACE-hero.jpg" alt="Describe the image"><figcaption>A short caption.</figcaption></figure>
-  <div class="benefits"><div><strong>Word</strong><span>One line.</span></div><div><strong>Word</strong><span>One line.</span></div><div><strong>Word</strong><span>One line.</span></div></div>
+  <div class="intro"><div class="label">Two-part kicker · like this</div><h1>A headline of six to ten words<br><em>broken onto a second line.</em></h1><p class="dek">One-sentence deck that frames the piece.</p></div>
+  <figure class="hero"><img src="https://cms.vmedical.ca/wp-content/uploads/REPLACE-hero.jpg" alt="Describe the image"><figcaption>A one-sentence caption that adds something the picture does not say.</figcaption></figure>
+  <div class="benefits"><div><strong>Word</strong><span>One short sentence.</span></div><div><strong>Word</strong><span>One short sentence.</span></div><div><strong>Word</strong><span>One short sentence.</span></div></div>
   <div class="article">
-    <p class="lead">An opening lead paragraph in the accent colour.</p>
-    <p>Body paragraphs…</p>
+    <p class="lead">An opening lead paragraph, larger and teal.</p>
     <section><h2>A section heading</h2><p>…</p><div class="pull">A short pull-quote line.<br>A second line.</div></section>
     <section><h2>Another section</h2><p>…</p></section>
   </div>
-  <section class="split"><figure><img src="images/REPLACE-feature.jpg" alt="Describe"><figcaption>Caption.</figcaption></figure><div><div class="label">SMALL LABEL</div><h2>A feature<br>call-out.</h2><p>…</p></div></section>
+  <section class="split"><figure><img src="https://cms.vmedical.ca/wp-content/uploads/REPLACE-feature.jpg" alt="Describe"><figcaption>Caption.</figcaption></figure><div><div class="label">SMALL LABEL</div><h2>A feature<br>call-out.</h2><p>…</p></div></section>
   <div class="article">
-    <section><h2>Heading</h2><p>…</p></section>
-    <section><h2>A checklist section</h2><ol class="steps"><li><strong>Lead in bold.</strong> Then the detail.</li><li><strong>…</strong> …</li></ol></section>
+    <section><h2>A checklist section</h2><ol class="steps"><li><strong>Do this.</strong> One sentence of detail.</li></ol></section>
   </div>
-  <section class="attention"><h2>When to seek care</h2><p>Plain safety guidance…</p><p><strong>Seek urgent care for …</strong></p></section>
+  <section class="attention"><h2>When to seek care</h2><p>Plain safety guidance…</p></section>
   <div class="closing-panel"><div class="label">Your next step</div><h2>A gentle<br>closing line.</h2><p>Invite the reader to Valley Medical…</p><p class="closing">A warm final sentence.</p></div>
 </article>
 
-Rules:
-- Use <img src="images/REPLACE-*.jpg"> placeholders with descriptive alt text; the team swaps in real images.
-- Not every block is required, but keep the general shape (intro → hero → benefits → article/sections → split → steps → attention → closing-panel).
-- Write for patients: clear, warm, and reassuring. This is HEALTH content: be accurate and evidence-aware, avoid diagnosing, avoid firm promises of outcomes, and include a sensible "seek care" note where relevant. Never invent specific prices, statistics, or clinic-specific claims that aren't in the knowledge base."""
+Notes on the blocks:
+- <em> in the h1 is NOT italic; it colours the second line teal. Exactly one <h1> (in .intro).
+- .benefits has exactly three items. .steps has four to six items, each led by a bolded instruction.
+- .split closes the reading column and a new <div class="article"> reopens it after.
+
+Rules (follow strictly):
+- Every image src is an absolute https://cms.vmedical.ca/wp-content/uploads/… URL with descriptive alt text. If you do not have a real uploaded image, use https://cms.vmedical.ca/wp-content/uploads/REPLACE-hero.jpg (or REPLACE-feature.jpg) as a placeholder for the team to swap. NEVER use a relative path, and never invent a real-looking URL.
+- No logo bar, no second <h1>, no inline style="" attributes.
+- Canadian spelling. Do NOT use em dashes anywhere: use commas, colons or full stops.
+- Write "Dr" with no full stop.
+- Plain, calm, specific. Explain the mechanism before the advice.
+- Say what a treatment does and does not do. Never promise an outcome.
+- Frame anything clinical as "ask your clinician" rather than direction.
+- Aim for 700 to 1100 words in total. Do not invent prices, statistics, or
+  clinic-specific claims that are not in the knowledge base."""
 
 
 def _content_system(context: str) -> str:
@@ -125,6 +138,36 @@ def _clean_article(text: str) -> str:
     if t:
         return '<article class="vma-calf-blog">\n' + t + '\n</article>'
     return ""
+
+
+def slugify(text: str) -> str:
+    """Lowercase, hyphenated, no dates — matches the site's /blog/<slug>.html."""
+    t = (text or "").strip().lower()
+    t = re.sub(r"[’'\"]", "", t)
+    t = re.sub(r"[^a-z0-9]+", "-", t).strip("-")
+    return t[:80] or "post"
+
+
+def review(body: str) -> list[str]:
+    """
+    Warnings to show before publishing live, per the site's format doc:
+    unreplaced/relative images and em dashes (the house style forbids them).
+    """
+    warnings: list[str] = []
+    body = body or ""
+    srcs = re.findall(r'<img[^>]+src="([^"]*)"', body, flags=re.I)
+    if any("REPLACE" in s for s in srcs):
+        warnings.append("Some images are still placeholders (REPLACE-…) — swap in real "
+                        "https://cms.vmedical.ca/wp-content/uploads/… URLs first.")
+    if any(not s.lower().startswith("https://") for s in srcs):
+        warnings.append("Some image paths aren't absolute https URLs — the site can't fetch "
+                        "relative paths and they'll 404 on the live site.")
+    if "—" in body or "–" in body:
+        warnings.append("The draft contains an em/en dash — the house style uses commas, "
+                        "colons or full stops instead.")
+    if body.lower().count("<h1") > 1:
+        warnings.append("There's more than one <h1> — the layout allows only the intro headline.")
+    return warnings
 
 
 def generate(brief: str, title: Optional[str] = None,

@@ -46,7 +46,10 @@ def _handle(r: httpx.Response) -> dict:
 
 
 def test_connection() -> dict:
-    """Confirm the URL + credentials work. Returns {ok, user|error}."""
+    """
+    Confirm the URL + credentials work, and check the account can post styled HTML.
+    Returns {ok, user, user_id, unfiltered_html, warning?} or {ok: False, error}.
+    """
     if not enabled():
         return {"ok": False, "error": "WordPress isn't configured "
                 "(set WORDPRESS_URL / WORDPRESS_USER / WORDPRESS_APP_PASSWORD)."}
@@ -55,14 +58,39 @@ def test_connection() -> dict:
             r = client.get(_api("/users/me"), auth=_auth(),
                            params={"context": "edit"})
         data = _handle(r)
-        return {"ok": True, "user": data.get("name") or data.get("slug") or "connected",
-                "user_id": data.get("id")}
+        caps = data.get("capabilities") or {}
+        unfiltered = bool(caps.get("unfiltered_html"))
+        out = {"ok": True, "user": data.get("name") or data.get("slug") or "connected",
+               "user_id": data.get("id"), "unfiltered_html": unfiltered}
+        if not unfiltered:
+            out["warning"] = ("This account lacks the 'unfiltered_html' capability, so "
+                              "WordPress will strip the post's <style> block and most "
+                              "attributes on save — posts arrive unstyled. Use an "
+                              "Administrator account (or an Editor on a single-site install).")
+        return out
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}
 
 
+def list_categories() -> list[dict]:
+    """Post categories from WordPress (id + name), for the Content editor dropdown."""
+    if not enabled():
+        return []
+    try:
+        with httpx.Client(timeout=20) as client:
+            r = client.get(_api("/categories"), auth=_auth(),
+                           params={"per_page": 100, "orderby": "name", "order": "asc"})
+        rows = _handle(r)
+        if isinstance(rows, list):
+            return [{"id": c.get("id"), "name": c.get("name", "")} for c in rows if c.get("id")]
+    except Exception:  # noqa: BLE001
+        pass
+    return []
+
+
 def create_or_update_post(title: str, content_html: str, status: str,
-                          excerpt: Optional[str] = None,
+                          excerpt: Optional[str] = None, slug: Optional[str] = None,
+                          category_id: Optional[str] = None,
                           post_id: Optional[str] = None) -> dict:
     """
     Create a new post, or update an existing one when post_id is given. `status`
@@ -76,6 +104,13 @@ def create_or_update_post(title: str, content_html: str, status: str,
     body: dict = {"title": title or "(untitled)", "content": content_html, "status": status}
     if excerpt:
         body["excerpt"] = excerpt
+    if slug:
+        body["slug"] = slug
+    if category_id:
+        try:
+            body["categories"] = [int(category_id)]
+        except (ValueError, TypeError):
+            pass
     if config.WORDPRESS_DEFAULT_AUTHOR:
         try:
             body["author"] = int(config.WORDPRESS_DEFAULT_AUTHOR)
@@ -89,7 +124,6 @@ def create_or_update_post(title: str, content_html: str, status: str,
 
     pid = data.get("id")
     link = data.get("link", "")
-    # A handy wp-admin edit link, best-effort.
     edit_link = f"{config.WORDPRESS_URL}/wp-admin/post.php?post={pid}&action=edit" if pid else ""
     return {"id": str(pid) if pid else "", "link": link,
             "status": data.get("status", status), "edit_link": edit_link}

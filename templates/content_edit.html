@@ -27,6 +27,9 @@
         <label class="field"><span>Title</span>
           <input type="text" name="title" value="{{ post.title or '' }}" placeholder="Post title"></label>
 
+        <label class="field" style="margin-top:.6rem"><span>Slug <span class="muted">— /blog/&lt;slug&gt;.html (blank = from title)</span></span>
+          <input type="text" name="slug" value="{{ post.slug or '' }}" placeholder="how-walking-helps-veins"></label>
+
         <label class="field" style="margin-top:.8rem"><span>Brief for Charlie
           <span class="muted">— topic, angle, key points</span></span>
           <textarea name="brief" rows="4"
@@ -54,8 +57,8 @@
             style="font-family:ui-monospace,Menlo,monospace;font-size:.82rem;line-height:1.5">{{ post.body or '' }}</textarea></label>
 
         <div class="field-row" style="margin-top:.8rem">
-          <label class="field"><span>Excerpt <span class="muted">(optional)</span></span>
-            <input type="text" name="excerpt" value="{{ post.excerpt or '' }}" placeholder="Short summary for listings"></label>
+          <label class="field"><span>Excerpt <span class="muted">(160–260 chars)</span></span>
+            <input type="text" name="excerpt" value="{{ post.excerpt or '' }}" placeholder="Short summary for the listing + meta description"></label>
           <label class="field"><span>Status</span>
             <select name="status">
               {% for s in statuses %}
@@ -63,6 +66,16 @@
               {% endfor %}
             </select></label>
         </div>
+
+        {% if categories %}
+        <label class="field" style="margin-top:.8rem"><span>Category <span class="muted">(WordPress)</span></span>
+          <select name="category_id">
+            <option value="">— none —</option>
+            {% for cat in categories %}
+            <option value="{{ cat.id }}" {{ 'selected' if (post.category_id|string) == (cat.id|string) }}>{{ cat.name }}</option>
+            {% endfor %}
+          </select></label>
+        {% endif %}
 
         <div class="modal-actions" style="justify-content:space-between;margin-top:1rem">
           <button class="btn" type="submit" formaction="/content/{{ post.id }}/save">Save</button>
@@ -75,6 +88,14 @@
       <!-- Push to WordPress -->
       <div class="card">
         <h2 style="margin:0 0 .5rem;font-size:1.05rem">Push to WordPress</h2>
+        {% if warnings %}
+        <div class="banner" style="background:#fff7ed;border-color:#fed7aa;color:#9a3412;margin:.2rem 0 .8rem">
+          <strong>Before publishing:</strong>
+          <ul style="margin:.3rem 0 0;padding-left:1.1rem">
+            {% for w in warnings %}<li>{{ w }}</li>{% endfor %}
+          </ul>
+        </div>
+        {% endif %}
         {% if post.wp_post_id %}
         <p class="muted" style="margin:.1rem 0 .7rem;font-size:.9rem">
           Currently in WordPress as <strong>{{ post.wp_status }}</strong>{% if post.pushed_by %},

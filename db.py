@@ -180,10 +180,12 @@ def init_db() -> None:
                 updated_at    TEXT NOT NULL,
                 created_by    TEXT,
                 title         TEXT NOT NULL DEFAULT '',
+                slug          TEXT,
                 brief         TEXT,            -- the idea/brief the team gave Charlie
                 body          TEXT,            -- the draft (HTML)
                 excerpt       TEXT,
                 tags          TEXT,            -- comma-separated
+                category_id   TEXT,            -- WordPress category id
                 status        TEXT NOT NULL DEFAULT 'idea',
                                  -- idea|drafting|draft|ready|published
                 wp_post_id    TEXT,            -- WordPress post id once pushed
@@ -202,6 +204,11 @@ def init_db() -> None:
         user_cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
         if user_cols and "password_hash" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+        blog_cols = {row["name"] for row in conn.execute("PRAGMA table_info(blog_posts)")}
+        if blog_cols and "slug" not in blog_cols:
+            conn.execute("ALTER TABLE blog_posts ADD COLUMN slug TEXT")
+        if blog_cols and "category_id" not in blog_cols:
+            conn.execute("ALTER TABLE blog_posts ADD COLUMN category_id TEXT")
         appt_cols = {row["name"] for row in conn.execute("PRAGMA table_info(appointments)")}
         if appt_cols and "ghl_appointment_id" not in appt_cols:
             conn.execute("ALTER TABLE appointments ADD COLUMN ghl_appointment_id TEXT")
@@ -415,7 +422,7 @@ def mark_web_message_responded(web_message_id: int, responded_by: str) -> None:
 
 
 # --- Blog posts (Content section → WordPress) --------------------------------
-_BLOG_FIELDS = {"title", "brief", "body", "excerpt", "tags", "status"}
+_BLOG_FIELDS = {"title", "slug", "brief", "body", "excerpt", "tags", "category_id", "status"}
 
 
 def create_blog_post(created_by: str, title: str = "") -> int:

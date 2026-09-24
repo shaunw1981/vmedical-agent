@@ -47,7 +47,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.11.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.12.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1237,18 +1237,21 @@ def content_edit(request: Request, post_id: int):
     post = db.get_blog_post(post_id)
     if not post:
         return RedirectResponse("/content", status_code=303)
+    categories = wordpress.list_categories() if wordpress.enabled() else []
     return templates.TemplateResponse(
         "content_edit.html",
         _ctx(request, user, post=post, statuses=_CONTENT_STATUSES,
              wp_ok=wordpress.enabled(), charlie_ok=config.charlie_enabled(),
+             categories=categories, warnings=content_svc.review(post.get("body") or ""),
              flash=request.session.pop("content_flash", None)),
     )
 
 
 @app.post("/content/{post_id}/save")
 def content_save(request: Request, post_id: int,
-                 title: str = Form(""), brief: str = Form(""), body: str = Form(""),
-                 excerpt: str = Form(""), tags: str = Form(""), status: str = Form("draft")):
+                 title: str = Form(""), slug: str = Form(""), brief: str = Form(""),
+                 body: str = Form(""), excerpt: str = Form(""), tags: str = Form(""),
+                 category_id: str = Form(""), status: str = Form("draft")):
     user, resp = _guard(request, "use_content")
     if resp:
         return resp
@@ -1256,9 +1259,10 @@ def content_save(request: Request, post_id: int,
         return RedirectResponse("/content", status_code=303)
     if status not in _CONTENT_STATUSES:
         status = "draft"
-    db.update_blog_post(post_id, title=title.strip(), brief=brief.strip(),
-                        body=body, excerpt=excerpt.strip(), tags=tags.strip(),
-                        status=status)
+    db.update_blog_post(post_id, title=title.strip(),
+                        slug=(slug.strip() or content_svc.slugify(title)),
+                        brief=brief.strip(), body=body, excerpt=excerpt.strip(),
+                        tags=tags.strip(), category_id=category_id.strip(), status=status)
     request.session["content_flash"] = {"ok": True, "msg": "Saved."}
     return RedirectResponse(f"/content/{post_id}", status_code=303)
 
@@ -1301,9 +1305,10 @@ def content_preview(request: Request, post_id: int):
 
 @app.post("/content/{post_id}/push")
 def content_push(request: Request, post_id: int, wp_status: str = Form("draft"),
-                 title: str = Form(None), body: str = Form(None),
+                 title: str = Form(None), body: str = Form(None), slug: str = Form(None),
                  excerpt: str = Form(None), brief: str = Form(None),
-                 tags: str = Form(None), status: str = Form(None)):
+                 tags: str = Form(None), category_id: str = Form(None),
+                 status: str = Form(None)):
     user, resp = _guard(request, "use_content")
     if resp:
         return resp
@@ -1317,11 +1322,15 @@ def content_push(request: Request, post_id: int, wp_status: str = Form("draft"),
 
     # Save current edits first so what you previewed is exactly what's pushed.
     edits = {}
-    if title is not None:   edits["title"] = title.strip()
-    if body is not None:    edits["body"] = body
-    if excerpt is not None: edits["excerpt"] = excerpt.strip()
-    if brief is not None:   edits["brief"] = brief.strip()
-    if tags is not None:    edits["tags"] = tags.strip()
+    if title is not None:       edits["title"] = title.strip()
+    if body is not None:        edits["body"] = body
+    if excerpt is not None:     edits["excerpt"] = excerpt.strip()
+    if brief is not None:       edits["brief"] = brief.strip()
+    if tags is not None:        edits["tags"] = tags.strip()
+    if category_id is not None: edits["category_id"] = category_id.strip()
+    if slug is not None:        edits["slug"] = slug.strip()
+    if title is not None and not (slug or "").strip():
+        edits["slug"] = content_svc.slugify(title)
     if edits:
         db.update_blog_post(post_id, **edits)
         post = db.get_blog_post(post_id)
@@ -1339,6 +1348,7 @@ def content_push(request: Request, post_id: int, wp_status: str = Form("draft"),
         res = wordpress.create_or_update_post(
             title=post.get("title") or "(untitled)", content_html=wp_html,
             status=wp_status, excerpt=(post.get("excerpt") or None),
+            slug=(post.get("slug") or None), category_id=(post.get("category_id") or None),
             post_id=(post.get("wp_post_id") or None))
     except Exception as exc:  # noqa: BLE001
         return flash(False, f"WordPress push failed: {exc}")
@@ -1346,8 +1356,12 @@ def content_push(request: Request, post_id: int, wp_status: str = Form("draft"),
     blog_status = "published" if wp_status == "publish" else "ready"
     db.set_blog_wp(post_id, wp_post_id=res["id"], wp_link=res.get("link") or res.get("edit_link", ""),
                    wp_status=wp_status, pushed_by=user["email"], status=blog_status)
-    where = "published live" if wp_status == "publish" else "sent to WordPress as a draft"
-    return flash(True, f"Post {where}.")
+    warns = content_svc.review(post["body"])
+    tail = (" Heads-up: " + " ".join(warns)) if warns else ""
+    if wp_status == "publish":
+        return flash(True, "Post published live. The website updates on its next rebuild "
+                           "(build/fetch_posts.py && deploy)." + tail)
+    return flash(True, "Post sent to WordPress as a draft." + tail)
 
 
 @app.post("/content/{post_id}/delete")
