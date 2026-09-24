@@ -18,46 +18,163 @@
       {% if persona_source == 'repo-seed' %}<br>You're editing the built-in starter text; saving stores your
       own copy in the vault.{% elif persona_source == 'empty' %}<br>No personality file yet; saving creates one.{% endif %}</p>
   </div>
-  <form method="post" action="/knowledge/persona/save" class="kb-form">
+  {% endif %}
+
+  <form method="post" id="kbForm" class="kb-form"
+        action="{{ '/knowledge/persona/save' if mode == 'persona' else '/knowledge/save' }}">
     <div class="card">
-      <label class="field"><span>Charlie's personality (Markdown)</span>
-        <textarea name="content" rows="20" spellcheck="true">{{ content }}</textarea></label>
-      <div class="modal-actions" style="justify-content:space-between;margin-top:1rem">
-        <button class="btn" type="submit">Save personality</button>
-        <a class="btn ghost" href="/knowledge">Cancel</a>
-      </div>
-    </div>
-  </form>
-  {% else %}
-  <form method="post" action="/knowledge/save" class="kb-form">
-    <div class="card">
+      {% if mode != 'persona' %}
       <label class="field"><span>Note name</span>
         <input type="text" name="name" value="{{ title }}" placeholder="e.g. Sclerotherapy aftercare"
                {{ 'readonly' if name }}>
         {% if name %}<span class="muted" style="font-size:.8rem">Renaming isn't supported here — delete and
           re-create to rename.</span>{% endif %}</label>
+      {% endif %}
 
-      <label class="field" style="margin-top:.9rem"><span>Content (Markdown)</span>
-        <textarea name="content" rows="20" spellcheck="true"
-          placeholder="# Topic&#10;&#10;Write what Charlie should know. One topic per note works best — services, pricing, a policy, an FAQ, post-care instructions…">{{ content }}</textarea></label>
+      <div class="field" style="margin-top:{{ '.9rem' if mode != 'persona' else '0' }}">
+        <span>{{ "Charlie's personality" if mode == 'persona' else 'Content' }}</span>
+
+        <div class="rt-toolbar">
+          <button type="button" data-cmd="bold" title="Bold"><b>B</b></button>
+          <button type="button" data-cmd="italic" title="Italic"><i>I</i></button>
+          <button type="button" data-cmd="formatBlock" data-val="h2" title="Heading">H2</button>
+          <button type="button" data-cmd="formatBlock" data-val="h3" title="Sub-heading">H3</button>
+          <button type="button" data-cmd="formatBlock" data-val="p" title="Normal text">Body</button>
+          <button type="button" data-cmd="insertUnorderedList" title="Bulleted list">• List</button>
+          <button type="button" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+          <button type="button" data-cmd="createLink" title="Add link">🔗</button>
+        </div>
+
+        <div id="rtEditor" class="rt-editor" contenteditable="true" spellcheck="true"></div>
+        <textarea name="content" id="rtSource" hidden>{{ content }}</textarea>
+      </div>
 
       <div class="modal-actions" style="justify-content:space-between;margin-top:1rem">
-        <button class="btn" type="submit">Save note</button>
+        <button class="btn" type="submit">{{ 'Save personality' if mode == 'persona' else 'Save note' }}</button>
         <a class="btn ghost" href="/knowledge">Cancel</a>
       </div>
+
+      <details style="margin-top:.9rem">
+        <summary class="muted" style="cursor:pointer;font-size:.85rem">Advanced: edit as Markdown</summary>
+        <textarea id="mdSource" rows="12" spellcheck="false"
+          style="font-family:ui-monospace,Menlo,monospace;font-size:.8rem;margin-top:.5rem"></textarea>
+        <div class="modal-actions" style="justify-content:flex-start;gap:.5rem;margin-top:.4rem">
+          <button type="button" class="btn secondary" id="showMd">Show Markdown</button>
+          <button type="button" class="btn" id="applyMd">Apply to editor</button>
+        </div>
+      </details>
     </div>
   </form>
-  {% endif %}
 
-  <p class="muted" style="font-size:.82rem;margin:.8rem 0 0">Saved to your Obsidian vault. Charlie reads the
-    whole vault, so changes apply to its next answer — no restart needed.</p>
+  <p class="muted" style="font-size:.82rem;margin:.8rem 0 0">Saved to your Obsidian vault as Markdown. Charlie
+    reads the whole vault, so changes apply to its next answer — no restart needed.</p>
 
   <style>
     .kb-form .field{ display:flex;flex-direction:column;gap:.3rem }
     .kb-form .field > span{ font-size:.82rem;font-weight:600;color:var(--muted) }
     .kb-form input, .kb-form textarea{ width:100%;box-sizing:border-box;padding:.55rem .7rem;
       border:1px solid var(--line);border-radius:6px;background:var(--surface,#fff);color:inherit;font-size:.95rem }
-    .kb-form textarea{ font-family:ui-monospace,Menlo,monospace;font-size:.86rem;line-height:1.55 }
     .kb-form input[readonly]{ background:var(--surface-2,#f3f3f3);color:var(--muted) }
+    .rt-toolbar{ display:flex;flex-wrap:wrap;gap:.25rem;border:1px solid var(--line);border-bottom:0;
+      border-radius:8px 8px 0 0;padding:.35rem;background:var(--surface-2,#f3f5f2) }
+    .rt-toolbar button{ font:600 .85rem/1 inherit;border:1px solid transparent;background:transparent;
+      color:var(--ink,#2A2B27);border-radius:6px;padding:.35rem .55rem;cursor:pointer }
+    .rt-toolbar button:hover{ background:#fff;border-color:var(--line) }
+    .rt-editor{ min-height:340px;border:1px solid var(--line);border-radius:0 0 8px 8px;
+      padding:1rem 1.1rem;background:#fff;color:#2A2B27;font-size:1rem;line-height:1.6;overflow:auto }
+    .rt-editor:focus{ outline:none;box-shadow:inset 0 0 0 2px #d9e0cd }
+    .rt-editor h2{ font-size:1.3rem;margin:1rem 0 .4rem;color:#5E6B51 }
+    .rt-editor h3{ font-size:1.08rem;margin:.9rem 0 .3rem;color:#5E6B51 }
+    .rt-editor p{ margin:0 0 .7rem }
+    .rt-editor ul,.rt-editor ol{ margin:0 0 .7rem;padding-left:1.4rem }
+    .rt-editor li{ margin-bottom:.25rem }
+    .rt-editor a{ color:#5E6B51 }
   </style>
+
+  <script>
+    (function(){
+      // ---- Markdown <-> HTML (compact; covers headings, bold/italic, links, lists, paragraphs) ----
+      function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+      function inlineMd(s){
+        s = esc(s);
+        s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+        s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        s = s.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
+        s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+        return s;
+      }
+      function md2html(md){
+        var lines = (md||'').replace(/\r/g,'').split('\n'), out = [], i = 0;
+        while(i < lines.length){
+          var line = lines[i];
+          var h = line.match(/^(#{1,6})\s+(.*)$/);
+          if(h){ var n = Math.min(h[1].length,6); out.push('<h'+n+'>'+inlineMd(h[2])+'</h'+n+'>'); i++; continue; }
+          if(/^\s*[-*]\s+/.test(line)){
+            var it = [];
+            while(i < lines.length && /^\s*[-*]\s+/.test(lines[i])){ it.push('<li>'+inlineMd(lines[i].replace(/^\s*[-*]\s+/,''))+'</li>'); i++; }
+            out.push('<ul>'+it.join('')+'</ul>'); continue;
+          }
+          if(/^\s*\d+\.\s+/.test(line)){
+            var it2 = [];
+            while(i < lines.length && /^\s*\d+\.\s+/.test(lines[i])){ it2.push('<li>'+inlineMd(lines[i].replace(/^\s*\d+\.\s+/,''))+'</li>'); i++; }
+            out.push('<ol>'+it2.join('')+'</ol>'); continue;
+          }
+          if(line.trim() === ''){ i++; continue; }
+          var para = [line]; i++;
+          while(i < lines.length && lines[i].trim() !== '' && !/^(#{1,6}\s|\s*[-*]\s|\s*\d+\.\s)/.test(lines[i])){ para.push(lines[i]); i++; }
+          out.push('<p>'+inlineMd(para.join(' '))+'</p>');
+        }
+        return out.join('\n') || '<p><br></p>';
+      }
+      function inlineNode(node){
+        if(node.nodeType === 3) return node.textContent;
+        if(node.nodeType !== 1) return '';
+        var tag = node.tagName.toLowerCase(), inner = '';
+        node.childNodes.forEach(function(c){ inner += inlineNode(c); });
+        if(tag==='strong'||tag==='b') return '**'+inner+'**';
+        if(tag==='em'||tag==='i') return '*'+inner+'*';
+        if(tag==='code') return '`'+inner+'`';
+        if(tag==='a') return '['+inner+']('+(node.getAttribute('href')||'')+')';
+        if(tag==='br') return '\n';
+        return inner;
+      }
+      function inlineOf(el){ var s=''; el.childNodes.forEach(function(c){ s += inlineNode(c); }); return s; }
+      function html2md(html){
+        var box = document.createElement('div'); box.innerHTML = html; var out = '';
+        box.childNodes.forEach(function(node){
+          if(node.nodeType === 3){ var t = node.textContent.trim(); if(t) out += t+'\n\n'; return; }
+          if(node.nodeType !== 1) return;
+          var tag = node.tagName.toLowerCase();
+          if(/^h[1-6]$/.test(tag)){ out += '#'.repeat(+tag[1])+' '+inlineOf(node).trim()+'\n\n'; return; }
+          if(tag==='ul'){ Array.prototype.forEach.call(node.children,function(li){ if(li.tagName.toLowerCase()==='li') out += '- '+inlineOf(li).trim()+'\n'; }); out += '\n'; return; }
+          if(tag==='ol'){ var n=1; Array.prototype.forEach.call(node.children,function(li){ if(li.tagName.toLowerCase()==='li') out += (n++)+'. '+inlineOf(li).trim()+'\n'; }); out += '\n'; return; }
+          if(tag==='p'||tag==='div'){ var t=inlineOf(node).trim(); if(t) out += t+'\n\n'; return; }
+          var tt = inlineNode(node).trim(); if(tt) out += tt+'\n\n';
+        });
+        return out.replace(/\n{3,}/g,'\n\n').trim()+'\n';
+      }
+
+      var editor = document.getElementById('rtEditor'),
+          src = document.getElementById('rtSource'),
+          form = document.getElementById('kbForm');
+      if(!editor || !src) return;
+      editor.innerHTML = md2html(src.value);          // Markdown -> rich text on load
+      form.addEventListener('submit', function(){ src.value = html2md(editor.innerHTML); });
+
+      document.querySelectorAll('.rt-toolbar [data-cmd]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var cmd = btn.getAttribute('data-cmd'), val = btn.getAttribute('data-val');
+          editor.focus();
+          if(cmd === 'createLink'){ var u = prompt('Link URL:'); if(u) document.execCommand('createLink', false, u); }
+          else if(cmd === 'formatBlock'){ document.execCommand('formatBlock', false, '<'+val+'>'); }
+          else document.execCommand(cmd, false, null);
+        });
+      });
+
+      var mdSrc = document.getElementById('mdSource'),
+          showMd = document.getElementById('showMd'), applyMd = document.getElementById('applyMd');
+      if(showMd) showMd.addEventListener('click', function(){ mdSrc.value = html2md(editor.innerHTML); });
+      if(applyMd) applyMd.addEventListener('click', function(){ editor.innerHTML = md2html(mdSrc.value); });
+    })();
+  </script>
 {% endblock %}
