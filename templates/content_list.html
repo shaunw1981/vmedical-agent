@@ -53,6 +53,10 @@
           <a class="btn ghost" href="{{ p.wp_link }}" target="_blank" rel="noopener">View in WordPress</a>
           {% endif %}
           <a class="btn secondary" href="/content/{{ p.id }}">Open</a>
+          <form method="post" action="/content/{{ p.id }}/delete" style="display:inline"
+                onsubmit="return confirm('Delete “{{ (p.title or 'Untitled post')|e }}”?{% if p.wp_post_id %} It will also be removed from WordPress (moved to Trash).{% endif %}');">
+            <button class="btn ghost" type="submit" style="color:var(--danger,#b42318)">Delete</button>
+          </form>
         </div>
       </div>
       {% if p.brief %}

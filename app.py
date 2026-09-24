@@ -48,7 +48,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.18.1")
+app = FastAPI(title="vmedical-agent dashboard", version="4.19.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1440,8 +1440,20 @@ def content_delete(request: Request, post_id: int):
     user, resp = _guard(request, "use_content")
     if resp:
         return resp
+    post = db.get_blog_post(post_id)
+    if not post:
+        return RedirectResponse("/content", status_code=303)
+    # If it was pushed to WordPress, remove it there too (Trash — recoverable).
+    if post.get("wp_post_id") and wordpress.enabled():
+        try:
+            wordpress.delete_post(post["wp_post_id"])
+        except Exception as exc:  # noqa: BLE001
+            request.session["content_flash"] = {"ok": False,
+                "msg": f"Couldn't remove it from WordPress ({exc}). Nothing was deleted — try again."}
+            return RedirectResponse(f"/content/{post_id}", status_code=303)
     db.delete_blog_post(post_id)
-    request.session["content_flash"] = {"ok": True, "msg": "Draft deleted."}
+    tail = " It was also moved to the WordPress Trash." if post.get("wp_post_id") else ""
+    request.session["content_flash"] = {"ok": True, "msg": "Post deleted." + tail}
     return RedirectResponse("/content", status_code=303)
 
 

@@ -117,6 +117,22 @@ def upload_media(content_bytes: bytes, filename: str, mime: str,
     return {"id": str(media_id), "source_url": source_url}
 
 
+def delete_post(post_id: str, force: bool = False) -> dict:
+    """
+    Remove a post from WordPress. Default moves it to Trash (recoverable);
+    force=True deletes permanently. A 404 (already gone) counts as success.
+    """
+    if not enabled():
+        raise RuntimeError("WordPress isn't configured.")
+    params = {"force": "true"} if force else None
+    with httpx.Client(timeout=30) as client:
+        r = client.delete(_api(f"/posts/{post_id}"), auth=_auth(), params=params)
+    if r.status_code == 404:
+        return {"ok": True, "already_gone": True}
+    _handle(r)
+    return {"ok": True}
+
+
 def create_or_update_post(title: str, content_html: str, status: str,
                           excerpt: Optional[str] = None, slug: Optional[str] = None,
                           category_id: Optional[str] = None,

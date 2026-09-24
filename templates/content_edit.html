@@ -106,7 +106,7 @@
             <button class="btn" type="submit" formaction="/content/{{ post.id }}/save">Save</button>
             <button class="btn ghost" type="submit" formaction="/content/{{ post.id }}/delete"
                     style="color:var(--danger,#b42318)"
-                    onclick="return confirm('Delete this draft from the dashboard? (It won\\'t remove anything already in WordPress.)')">Delete</button>
+                    onclick="return confirm('Delete this post?{% if post.wp_post_id %} It will also be removed from WordPress (moved to Trash).{% endif %}');">Delete</button>
           </div>
 
           <details style="margin-top:.9rem">
