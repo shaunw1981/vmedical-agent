@@ -40,10 +40,12 @@
           <div class="modal-actions" style="justify-content:flex-start;margin-top:.7rem;gap:.5rem;flex-wrap:wrap">
             {% if charlie_ok %}
             <button class="btn" type="submit" formaction="/content/{{ post.id }}/generate"
-                    name="refine" value="0">{{ 'Draft with Charlie' if not post.body else 'Re-draft from brief' }}</button>
+                    name="refine" value="0" data-kind="draft"
+                    data-working="{{ 'Charlie is writing your draft…' if not post.body else 'Charlie is re-drafting…' }}">{{ 'Draft with Charlie' if not post.body else 'Re-draft from brief' }}</button>
             {% if post.body %}
             <button class="btn secondary" type="submit" formaction="/content/{{ post.id }}/generate"
-                    name="refine" value="1">↻ Refine current draft</button>
+                    name="refine" value="1" data-kind="draft"
+                    data-working="Charlie is refining the draft…">↻ Refine current draft</button>
             {% endif %}
             {% else %}
             <span class="muted">Connect Charlie (an engine) to draft automatically.</span>
@@ -114,9 +116,11 @@
           {% if wp_ok %}
           <div class="modal-actions" style="justify-content:flex-start;gap:.6rem;flex-wrap:wrap">
             <button class="btn secondary" type="submit" formaction="/content/{{ post.id }}/push"
-                    name="wp_status" value="draft">Send as WordPress draft</button>
+                    name="wp_status" value="draft" data-kind="publish"
+                    data-working="Sending to WordPress…">Send as WordPress draft</button>
             <button class="btn" type="submit" formaction="/content/{{ post.id }}/push"
-                    name="wp_status" value="publish"
+                    name="wp_status" value="publish" data-kind="publish"
+                    data-working="Publishing live to the website…"
                     onclick="return confirm('Publish live to the website now?')">Publish live</button>
           </div>
           {% else %}
@@ -140,7 +144,8 @@
           <label class="field"><span>Placement note <span class="muted">(optional)</span></span>
             <input type="text" name="note" placeholder="e.g. use as the hero, or near the compression section"></label>
           <div class="modal-actions" style="justify-content:flex-start">
-            <button class="btn" type="submit">Upload &amp; let Charlie place it</button>
+            <button class="btn" type="submit" data-kind="image"
+                    data-working="Uploading and placing your image…">Upload &amp; let Charlie place it</button>
           </div>
         </form>
         <p class="muted" style="font-size:.8rem;margin:.6rem 0 0"><strong>Save your draft first.</strong>
@@ -177,4 +182,93 @@
     .content-editor .field-row{ display:flex;gap:.8rem;flex-wrap:wrap }
     .content-editor .field-row .field{ flex:1;min-width:180px }
   </style>
+
+  <!-- Working overlay: shows while Charlie / WordPress is busy so it never looks stalled -->
+  <div id="cw-overlay" aria-hidden="true">
+    <div class="cw-card" role="status" aria-live="polite">
+      <div class="cw-badge">✍️</div>
+      <div class="cw-title">Working…</div>
+      <div class="cw-track"><div class="cw-fill"></div></div>
+      <div class="cw-row"><span class="cw-tip">Warming up…</span><span class="cw-time">0s</span></div>
+      <div class="cw-note">Keep this tab open. On the local model a draft can take up to a minute.</div>
+    </div>
+  </div>
+
+  <style>
+    #cw-overlay{ position:fixed; inset:0; z-index:1000; display:none;
+      background:rgba(22,30,26,.55); backdrop-filter:blur(2px);
+      align-items:center; justify-content:center; padding:24px }
+    #cw-overlay.on{ display:flex }
+    .cw-card{ width:min(420px,92vw); background:#fff; color:#1f2430; border-radius:14px;
+      box-shadow:0 18px 60px rgba(0,0,0,.35); padding:1.6rem 1.7rem; text-align:center;
+      font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif }
+    .cw-badge{ font-size:1.7rem; margin-bottom:.4rem }
+    .cw-title{ font-size:1.12rem; font-weight:700; margin-bottom:1rem; color:#2A2B27 }
+    .cw-track{ height:8px; border-radius:99px; background:#e7eae1; overflow:hidden; position:relative }
+    .cw-fill{ height:100%; width:8%; border-radius:99px;
+      background:linear-gradient(90deg,#7D8B6E,#5E6B51); transition:width .4s ease }
+    .cw-track::after{ content:""; position:absolute; inset:0;
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);
+      transform:translateX(-100%); animation:cw-shimmer 1.4s infinite }
+    .cw-row{ display:flex; justify-content:space-between; align-items:baseline;
+      margin-top:.7rem; font-size:.9rem; color:#5E6157 }
+    .cw-time{ font-variant-numeric:tabular-nums; font-weight:600; color:#5E6B51 }
+    .cw-note{ margin-top:.9rem; font-size:.8rem; color:#9aa29a }
+    @keyframes cw-shimmer{ 100%{ transform:translateX(100%) } }
+    @media (prefers-reduced-motion:reduce){
+      .cw-track::after{ animation:none } .cw-fill{ transition:none }
+    }
+  </style>
+
+  <script>
+    (function(){
+      var overlay = document.getElementById('cw-overlay');
+      if(!overlay) return;
+      var fill = overlay.querySelector('.cw-fill'),
+          titleEl = overlay.querySelector('.cw-title'),
+          tipEl = overlay.querySelector('.cw-tip'),
+          timeEl = overlay.querySelector('.cw-time'),
+          badgeEl = overlay.querySelector('.cw-badge');
+      var TIPS = {
+        draft: ['Reading your knowledge base…','Learning from your published posts…',
+                'Writing in Valley Medical’s house style…','Shaping sections and headings…',
+                'Adding the finishing touches…'],
+        image: ['Uploading to the media library…','Reading the article…',
+                'Choosing the best spot…','Placing your image…'],
+        publish: ['Packaging the post…','Sending to WordPress…','Finalising…']
+      };
+      var BADGE = { draft:'✍️', image:'🖼', publish:'🚀' };
+      var timers = [];
+      function start(msg, kind){
+        titleEl.textContent = msg || 'Working…';
+        badgeEl.textContent = BADGE[kind] || '✍️';
+        var tips = TIPS[kind] || TIPS.draft, ti = 0;
+        tipEl.textContent = tips[0];
+        overlay.classList.add('on');
+        var pct = 8, t0 = Date.now();
+        fill.style.width = pct + '%';
+        // Asymptotic fill: always moving, never reaches 100% until the page navigates.
+        timers.push(setInterval(function(){
+          pct += (95 - pct) * 0.05; fill.style.width = pct.toFixed(1) + '%';
+        }, 450));
+        timers.push(setInterval(function(){
+          timeEl.textContent = Math.round((Date.now()-t0)/1000) + 's';
+        }, 1000));
+        timers.push(setInterval(function(){
+          ti = (ti+1) % tips.length; tipEl.textContent = tips[ti];
+        }, 3200));
+        // Failsafe: if navigation somehow doesn't happen, release after 3 min.
+        timers.push(setTimeout(hide, 180000));
+      }
+      function hide(){ overlay.classList.remove('on'); timers.forEach(clearInterval); timers.forEach(clearTimeout); timers = []; }
+      document.querySelectorAll('form').forEach(function(f){
+        f.addEventListener('submit', function(e){
+          var b = e.submitter || document.activeElement;
+          if(b && b.dataset && b.dataset.working){ start(b.dataset.working, b.dataset.kind); }
+        });
+      });
+      // If the user comes back via the browser Back button, make sure it's hidden.
+      window.addEventListener('pageshow', hide);
+    })();
+  </script>
 {% endblock %}
