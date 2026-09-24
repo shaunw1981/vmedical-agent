@@ -48,7 +48,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.16.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.17.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1245,6 +1245,7 @@ def content_edit(request: Request, post_id: int):
              wp_ok=wordpress.enabled(), charlie_ok=config.charlie_enabled(),
              categories=categories, warnings=content_svc.review(post.get("body") or ""),
              learned=len([p for p in db.list_published_posts(20) if p["id"] != post_id]),
+             content_engine=config.content_engine_label(),
              flash=request.session.pop("content_flash", None)),
     )
 

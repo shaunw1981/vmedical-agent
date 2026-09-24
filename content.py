@@ -210,6 +210,16 @@ def review(body: str) -> list[str]:
     return warnings
 
 
+def _engine_unavailable(provider: str) -> Optional[str]:
+    """A friendly error if the resolved content engine can't run, else None."""
+    if provider == "anthropic" and not config.ANTHROPIC_API_KEY:
+        return ("Content is set to draft with Anthropic (CHARLIE_CONTENT_PROVIDER=anthropic) "
+                "but no ANTHROPIC_API_KEY is set. Add the key, or set CHARLIE_CONTENT_PROVIDER=ollama.")
+    if provider != "anthropic" and not config.charlie_enabled() and provider != "ollama":
+        return "Charlie isn't connected (set CHARLIE_PROVIDER, or add an ANTHROPIC_API_KEY)."
+    return None
+
+
 def generate(brief: str, title: Optional[str] = None,
              existing: Optional[str] = None, provider: Optional[str] = None,
              exclude_id: Optional[int] = None) -> dict:
@@ -220,9 +230,10 @@ def generate(brief: str, title: Optional[str] = None,
     brief = (brief or "").strip()
     if not brief and not existing:
         return {"ok": False, "error": "Give Charlie a topic or brief first."}
-    if not config.charlie_enabled():
-        return {"ok": False, "error": "Charlie isn't connected "
-                "(set CHARLIE_PROVIDER=ollama, or add an ANTHROPIC_API_KEY)."}
+    prov = provider or config.charlie_provider_for("content")
+    err = _engine_unavailable(prov)
+    if err:
+        return {"ok": False, "error": err}
 
     hits = charlie.retrieve(brief or (title or ""))
     context = charlie._build_context(hits, brief or (title or ""))
@@ -246,7 +257,8 @@ def generate(brief: str, title: Optional[str] = None,
     user = "\n\n".join(parts)
 
     try:
-        text = charlie.chat_once(_content_system(context), user, provider)
+        text = charlie.chat_once(_content_system(context), user, prov,
+                                 model=config.charlie_model_for("content"))
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"Charlie couldn't draft this: {exc}"}
 
@@ -301,13 +313,16 @@ def place_image(body: str, image_url: str, alt: str,
     """Ask Charlie to insert an uploaded image at the best spot. Returns {ok, body|error}."""
     if not (body or "").strip():
         return {"ok": False, "error": "Write the draft first, then add images."}
-    if not config.charlie_enabled():
-        return {"ok": False, "error": "Charlie isn't connected."}
+    prov = provider or config.charlie_provider_for("content")
+    err = _engine_unavailable(prov)
+    if err:
+        return {"ok": False, "error": err}
     user = (f"Image URL: {image_url}\nAlt text: {alt or '(none given)'}\n"
             + (f"Note about the image: {note}\n" if note else "")
             + "\nArticle to edit:\n" + body)
     try:
-        text = charlie.chat_once(_PLACE_SYSTEM, user, provider)
+        text = charlie.chat_once(_PLACE_SYSTEM, user, prov,
+                                 model=config.charlie_model_for("content"))
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"Charlie couldn't place the image: {exc}"}
     new_body = _clean_article(text)

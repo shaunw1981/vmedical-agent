@@ -365,21 +365,23 @@ def _to_openai_tools(tools: list[dict]) -> list[dict]:
 
 
 def _chat(provider: str, system: str, messages: list[dict],
-          tools: Optional[list[dict]] = None, force_tool: bool = False) -> dict:
+          tools: Optional[list[dict]] = None, force_tool: bool = False,
+          model: Optional[str] = None) -> dict:
     """Run one turn on the chosen engine. Raises RuntimeError on failure."""
     if provider == "ollama":
-        return _chat_ollama(system, messages, tools, force_tool)
-    return _chat_anthropic(system, messages, tools, force_tool)
+        return _chat_ollama(system, messages, tools, force_tool, model)
+    return _chat_anthropic(system, messages, tools, force_tool, model)
 
 
 def _chat_anthropic(system: str, messages: list[dict],
-                    tools: Optional[list[dict]], force_tool: bool) -> dict:
+                    tools: Optional[list[dict]], force_tool: bool,
+                    model: Optional[str] = None) -> dict:
     try:
         import anthropic
     except ImportError:
         raise RuntimeError("The 'anthropic' package isn't installed — run update.command.")
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-    kwargs = dict(model=config.CHARLIE_MODEL, max_tokens=_MAX_TOKENS,
+    kwargs = dict(model=model or config.CHARLIE_MODEL, max_tokens=_MAX_TOKENS,
                   system=system, messages=messages)
     if tools:
         kwargs["tools"] = tools
@@ -398,11 +400,12 @@ def _chat_anthropic(system: str, messages: list[dict],
 
 
 def _chat_ollama(system: str, messages: list[dict],
-                 tools: Optional[list[dict]], force_tool: bool) -> dict:
+                 tools: Optional[list[dict]], force_tool: bool,
+                 model: Optional[str] = None) -> dict:
     """Talk to a local Ollama server via its OpenAI-compatible endpoint."""
     url = f"{config.OLLAMA_URL}/v1/chat/completions"
     body: dict = {
-        "model": config.OLLAMA_MODEL,
+        "model": model or config.OLLAMA_MODEL,
         "messages": [{"role": "system", "content": system}, *messages],
         "max_tokens": _MAX_TOKENS,
         "stream": False,
@@ -418,7 +421,7 @@ def _chat_ollama(system: str, messages: list[dict],
     except httpx.RequestError as exc:
         raise RuntimeError(
             f"Couldn't reach Ollama at {config.OLLAMA_URL} — is `ollama serve` running "
-            f"and is {config.OLLAMA_MODEL} pulled? ({exc})")
+            f"and is {body['model']} pulled? ({exc})")
     if r.status_code >= 400:
         snippet = (r.text or "").strip()
         if len(snippet) > 300:
@@ -448,13 +451,14 @@ def _chat_ollama(system: str, messages: list[dict],
     return {"text": text, "tool_calls": calls}
 
 
-def chat_once(system: str, user_text: str, provider: Optional[str] = None) -> str:
+def chat_once(system: str, user_text: str, provider: Optional[str] = None,
+              model: Optional[str] = None) -> str:
     """
     Public one-shot completion for other modules (e.g. blog content). Runs on the
-    given provider, or Charlie's default. Returns the model's text.
+    given provider/model, or Charlie's default. Returns the model's text.
     """
     prov = provider or config.charlie_provider_for("ask")
-    res = _chat(prov, system, [{"role": "user", "content": user_text}])
+    res = _chat(prov, system, [{"role": "user", "content": user_text}], model=model)
     return res["text"]
 
 
@@ -671,6 +675,8 @@ def debug(sample_query: str = "test") -> dict:
         "charlie_enabled": enabled(),
         "provider": config.CHARLIE_PROVIDER,
         "converse_provider": config.charlie_provider_for("converse"),
+        "content_provider": config.charlie_provider_for("content"),
+        "content_model": config.charlie_model_for("content"),
         "model": config.charlie_model(),
         "vault_configured": obsidian.is_configured(),
         "vault_base": str(base) if base else None,

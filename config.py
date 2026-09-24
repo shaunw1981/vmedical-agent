@@ -172,14 +172,39 @@ OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "120") or "120")
 # runs locally on Ollama. Leave blank to use CHARLIE_PROVIDER everywhere.
 CHARLIE_CONVERSE_PROVIDER = os.environ.get("CHARLIE_CONVERSE_PROVIDER", "").strip().lower()
 
+# Optional: run blog content generation on a different provider/model than the
+# rest — e.g. draft posts with Claude (higher quality) while Ask-Charlie runs
+# locally on Ollama. Leave CHARLIE_CONTENT_PROVIDER blank to use CHARLIE_PROVIDER.
+# CHARLIE_CONTENT_MODEL overrides the model just for content (e.g. claude-opus-5,
+# or qwen2.5:32b); blank falls back to the provider's default model.
+CHARLIE_CONTENT_PROVIDER = os.environ.get("CHARLIE_CONTENT_PROVIDER", "").strip().lower()
+CHARLIE_CONTENT_MODEL = os.environ.get("CHARLIE_CONTENT_MODEL", "").strip()
+
 CHARLIE_NAME = os.environ.get("CHARLIE_NAME", "Charlie").strip() or "Charlie"
 
 
 def charlie_provider_for(path: str) -> str:
-    """Which engine runs a given path: 'ask' (staff Q&A) or 'converse' (patient SMS)."""
+    """Which engine runs a path: 'ask' (staff Q&A), 'converse' (SMS), 'content' (blog)."""
     if path == "converse" and CHARLIE_CONVERSE_PROVIDER:
         return CHARLIE_CONVERSE_PROVIDER
+    if path == "content" and CHARLIE_CONTENT_PROVIDER:
+        return CHARLIE_CONTENT_PROVIDER
     return CHARLIE_PROVIDER
+
+
+def charlie_model_for(path: str) -> str:
+    """The model name for a path, honoring per-path overrides."""
+    prov = charlie_provider_for(path)
+    if path == "content" and CHARLIE_CONTENT_MODEL:
+        return CHARLIE_CONTENT_MODEL
+    return OLLAMA_MODEL if prov == "ollama" else CHARLIE_MODEL
+
+
+def content_engine_label() -> str:
+    """Human label of the engine drafting blog content, for the editor."""
+    prov = charlie_provider_for("content")
+    model = charlie_model_for("content")
+    return (f"Claude · {model}" if prov == "anthropic" else f"local · {model}")
 
 
 def charlie_model() -> str:

@@ -31,7 +31,8 @@
           <p class="muted" style="margin:.1rem 0 .8rem;font-size:.86rem">Tell Charlie what to write.
             It drafts in Valley Medical's house style, grounded in your knowledge base{% if learned %},
             and learns from your <strong>{{ learned }}</strong> published post(s) to keep the voice
-            consistent{% endif %}. Always review before publishing.</p>
+            consistent{% endif %}. Always review before publishing.{% if content_engine %}
+            <br><span style="font-size:.8rem">Drafting engine: <strong>{{ content_engine }}</strong></span>{% endif %}</p>
 
           <label class="field"><span>What should this post be about?</span>
             <textarea name="brief" rows="{{ 6 if not post.body else 3 }}" {% if not post.body %}autofocus{% endif %}
