@@ -342,6 +342,7 @@ DEFAULT_ROLE = "team_member"
 #                       hand-offs): send a reply, direct Charlie, or take over
 #   use_content       - draft blog posts with Charlie and push them to WordPress
 #   manage_knowledge  - edit Charlie's knowledge base + personality (Obsidian)
+#   view_surveys      - see the anonymous patient-satisfaction survey results
 ROLE_CAPABILITIES = {
     "super_admin": {
         "view_messages",
@@ -358,6 +359,7 @@ ROLE_CAPABILITIES = {
         "use_inbox",
         "use_content",
         "manage_knowledge",
+        "view_surveys",
     },
     "spa_manager": {
         "view_messages",
@@ -373,6 +375,7 @@ ROLE_CAPABILITIES = {
         "use_inbox",
         "use_content",
         "manage_knowledge",
+        "view_surveys",
     },
     "team_member": {
         "view_messages",

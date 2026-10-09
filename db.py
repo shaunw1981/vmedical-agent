@@ -195,6 +195,15 @@ def init_db() -> None:
                 pushed_by     TEXT,
                 pushed_at     TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS survey_responses (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at    TEXT NOT NULL,
+                survey_key    TEXT NOT NULL DEFAULT 'patient_satisfaction',
+                treatment     TEXT,            -- comma-separated procedure(s), optional
+                answers       TEXT NOT NULL,   -- JSON: {question_key: value}
+                source        TEXT             -- how they arrived: 'qr'|'email'|'link'
+            );
             """
         )
         # Lightweight migrations: add columns that newer versions expect, so an
@@ -499,6 +508,49 @@ def list_published_posts(limit: int = 20) -> list[dict]:
             "SELECT * FROM blog_posts WHERE status = 'published' OR wp_status = 'publish' "
             "ORDER BY updated_at DESC, id DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+
+# --- Patient satisfaction surveys (anonymous) --------------------------------
+def add_survey_response(answers: dict, treatment: Optional[list] = None,
+                        source: Optional[str] = None,
+                        survey_key: str = "patient_satisfaction") -> int:
+    """Store one anonymous survey response. `answers` is a plain dict."""
+    import json as _json
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO survey_responses (created_at, survey_key, treatment, answers, source) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (datetime.now().isoformat(timespec="seconds"), survey_key,
+             ", ".join(treatment or []) or None, _json.dumps(answers), source),
+        )
+        return int(cur.lastrowid)
+
+
+def list_survey_responses(survey_key: str = "patient_satisfaction") -> list[dict]:
+    """All responses for a survey, newest first, with answers parsed to a dict."""
+    import json as _json
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM survey_responses WHERE survey_key = ? ORDER BY id DESC",
+            (survey_key,),
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["answers"] = _json.loads(d.get("answers") or "{}")
+        except Exception:  # noqa: BLE001
+            d["answers"] = {}
+        d["treatment"] = [t.strip() for t in (d.get("treatment") or "").split(",") if t.strip()]
+        out.append(d)
+    return out
+
+
+def count_survey_responses(survey_key: str = "patient_satisfaction") -> int:
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM survey_responses WHERE survey_key = ?", (survey_key,)
+        ).fetchone()[0]
 
 
 # --- Settings (small key/value store, e.g. reminder workflow mapping) --------

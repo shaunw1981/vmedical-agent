@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{ title }} — Valley Medical Aesthetics</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%237c8a73'/%3E%3C/svg%3E">
+  <style>
+    :root{
+      --olive:#7D8B6E; --olive-deep:#5E6B51; --ink:#2A2B27; --cream:#F3EEE7;
+      --line:#E2DED6; --muted:#6b6f66; --surface:#ffffff;
+    }
+    *{ box-sizing:border-box; }
+    html{ -webkit-text-size-adjust:100%; }
+    body{ margin:0; background:var(--cream); color:var(--ink);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      line-height:1.55; }
+    .wrap{ max-width:680px; margin:0 auto; padding:24px 18px 64px; }
+    header.masthead{ text-align:center; padding:20px 0 8px; }
+    .kicker{ letter-spacing:.14em; text-transform:uppercase; font-size:.72rem;
+      color:var(--olive-deep); font-weight:700; }
+    h1{ font-family:Georgia,'Times New Roman',serif; font-weight:600;
+      font-size:1.9rem; margin:.3rem 0 .4rem; }
+    .intro{ color:var(--muted); font-size:1rem; margin:.2rem auto 0; max-width:40rem; }
+    .card{ background:var(--surface); border:1px solid var(--line); border-radius:14px;
+      padding:18px 18px 6px; margin:16px 0; box-shadow:0 4px 14px rgba(0,0,0,.03); }
+    .section-title{ font-weight:700; font-size:1.08rem; color:var(--olive-deep);
+      margin:.2rem 0 .2rem; }
+    .scale-hint{ font-size:.82rem; color:var(--muted); margin:0 0 .6rem; }
+    .q{ padding:14px 0; border-top:1px solid var(--line); }
+    .q:first-of-type{ border-top:0; }
+    .q-text{ font-size:1rem; margin:0 0 .6rem; }
+    /* Likert segmented options */
+    .likert{ display:flex; gap:6px; }
+    .likert label{ flex:1; position:relative; }
+    .likert input{ position:absolute; opacity:0; inset:0; cursor:pointer; }
+    .likert .opt{ display:flex; align-items:center; justify-content:center;
+      border:1px solid var(--line); border-radius:10px; padding:12px 0; font-weight:700;
+      font-size:1.05rem; color:var(--ink); background:#fbfaf7; cursor:pointer;
+      transition:all .12s ease; min-height:48px; }
+    .likert input:checked + .opt{ background:var(--olive); color:#fff; border-color:var(--olive-deep); }
+    .likert input:focus-visible + .opt{ outline:2px solid var(--olive-deep); outline-offset:2px; }
+    .ends{ display:flex; justify-content:space-between; font-size:.72rem; color:var(--muted);
+      margin-top:5px; }
+    /* Yes / No */
+    .yn{ display:flex; gap:10px; }
+    .yn label{ position:relative; flex:0 0 auto; }
+    .yn input{ position:absolute; opacity:0; inset:0; cursor:pointer; }
+    .yn .opt{ display:inline-flex; align-items:center; justify-content:center;
+      border:1px solid var(--line); border-radius:10px; padding:11px 26px; font-weight:600;
+      background:#fbfaf7; cursor:pointer; min-height:46px; }
+    .yn input:checked + .opt{ background:var(--olive); color:#fff; border-color:var(--olive-deep); }
+    .yn input:focus-visible + .opt{ outline:2px solid var(--olive-deep); outline-offset:2px; }
+    textarea{ width:100%; border:1px solid var(--line); border-radius:10px; padding:11px 12px;
+      font:inherit; font-size:1rem; resize:vertical; min-height:70px; background:#fff; color:inherit; }
+    .explain{ margin-top:.5rem; }
+    .explain label{ display:block; font-size:.82rem; color:var(--muted); margin-bottom:.25rem; }
+    .treatments{ display:flex; flex-wrap:wrap; gap:10px; }
+    .treatments label{ position:relative; }
+    .treatments input{ position:absolute; opacity:0; inset:0; cursor:pointer; }
+    .treatments .opt{ display:inline-flex; align-items:center; gap:8px; border:1px solid var(--line);
+      border-radius:999px; padding:9px 16px; background:#fbfaf7; cursor:pointer; min-height:44px; }
+    .treatments input:checked + .opt{ background:var(--olive); color:#fff; border-color:var(--olive-deep); }
+    .submit-row{ margin:22px 0 0; }
+    button.submit{ width:100%; background:var(--olive-deep); color:#fff; border:0;
+      border-radius:12px; padding:16px; font-size:1.1rem; font-weight:700; cursor:pointer; }
+    button.submit:hover{ background:#4e5944; }
+    .err{ background:#fdecea; border:1px solid #f5c6c0; color:#8a2c20; border-radius:10px;
+      padding:12px 14px; margin:14px 0; }
+    .hp{ position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden; }
+    footer{ text-align:center; color:var(--muted); font-size:.8rem; margin-top:26px; }
+    /* Thank-you */
+    .thanks{ text-align:center; padding:48px 16px; }
+    .thanks .check{ width:72px; height:72px; border-radius:50%; background:var(--olive);
+      color:#fff; display:flex; align-items:center; justify-content:center; font-size:2.2rem;
+      margin:0 auto 18px; }
+    .thanks h1{ margin:.2rem 0; }
+    .thanks p{ color:var(--muted); font-size:1.08rem; max-width:30rem; margin:.4rem auto; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+  {% if submitted %}
+    <div class="thanks">
+      <div class="check">✓</div>
+      <h1>Thank you</h1>
+      <p>Your feedback has been received — anonymously, just as promised.
+         We're grateful you took the time to help us care for you better.</p>
+    </div>
+    <footer>Valley Medical Aesthetics · 66 Exhibition Street, Kentville NS</footer>
+  {% else %}
+
+    <header class="masthead">
+      <div class="kicker">Valley Medical Aesthetics</div>
+      <h1>{{ title }}</h1>
+      <p class="intro">{{ intro }}</p>
+    </header>
+
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+    <form method="post" action="/survey/submit" autocomplete="off">
+      <input type="hidden" name="src" value="{{ src }}">
+      <div class="hp" aria-hidden="true">
+        <label>Leave this field empty<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Which treatment is this about?</div>
+        <p class="scale-hint">Optional — choose any that apply.</p>
+        <div class="q" style="border-top:0;padding-top:4px">
+          <div class="treatments">
+            {% for t in treatments %}
+            <label><input type="checkbox" name="treatment" value="{{ t }}"><span class="opt">{{ t }}</span></label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      {% for section in sections %}
+      <div class="card">
+        <div class="section-title">{{ section.title }}</div>
+        {% if section.type == 'likert' %}
+        <p class="scale-hint">1 = {{ scale_min_label }} &nbsp;·&nbsp; 5 = {{ scale_max_label }}</p>
+        {% endif %}
+
+        {% for q in section.questions %}
+          {% set qtype = q.type or section.type %}
+          <div class="q">
+            <p class="q-text">{{ q.text }}</p>
+
+            {% if qtype == 'likert' %}
+              <div class="likert">
+                {% for n in scale %}
+                <label>
+                  <input type="radio" name="{{ q.key }}" value="{{ n }}">
+                  <span class="opt">{{ n }}</span>
+                </label>
+                {% endfor %}
+              </div>
+              <div class="ends"><span>{{ scale_min_label }}</span><span>{{ scale_max_label }}</span></div>
+
+            {% elif qtype == 'yesno' %}
+              <div class="yn">
+                <label><input type="radio" name="{{ q.key }}" value="yes"><span class="opt">Yes</span></label>
+                <label><input type="radio" name="{{ q.key }}" value="no"><span class="opt">No</span></label>
+              </div>
+              {% if q.explain %}
+              <div class="explain">
+                <label>{{ q.explain }}</label>
+                <textarea name="{{ q.key }}_explain" rows="2" placeholder="Optional"></textarea>
+              </div>
+              {% endif %}
+
+            {% elif qtype == 'text' %}
+              <textarea name="{{ q.key }}" rows="3" placeholder="Your answer (optional)"></textarea>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+
+      <div class="submit-row">
+        <button class="submit" type="submit">Submit my feedback</button>
+      </div>
+    </form>
+
+    <footer>Your responses are anonymous. · Valley Medical Aesthetics, Kentville NS</footer>
+  {% endif %}
+
+  </div>
+</body>
+</html>

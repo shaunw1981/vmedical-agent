@@ -43,12 +43,13 @@ import mailer
 import meetings as meetings_svc
 import obsidian
 import reminders
+import survey as survey_svc
 import wordpress
 
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.21.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.22.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1799,3 +1800,244 @@ async def ghl_call_webhook(request: Request):
         return {"status": "duplicate_ignored"}
 
     return {"status": "saved", "message_id": message_id, "obsidian_file": vault_file}
+
+
+# =============================================================================
+# Patient Satisfaction Survey
+#
+# PUBLIC (no login): the anonymous survey form the patient fills in, reached by
+# a QR code in the office or an emailed link. Nothing identifying is stored.
+# PROTECTED (view_surveys): the results dashboard, the printable QR poster, the
+# "email the link" action, and a CSV export.
+# =============================================================================
+
+def _survey_public_url(src: str = "") -> str:
+    base = f"{config.BASE_URL}/survey"
+    return f"{base}?src={src}" if src else base
+
+
+def _qr_svg(url: str) -> Optional[str]:
+    """Return an inline SVG QR code for `url`, or None if the QR lib is missing."""
+    try:
+        import io
+        import segno  # pure-python, no system deps
+        qr = segno.make(url, error="m")
+        buff = io.BytesIO()
+        qr.save(buff, kind="svg", scale=6, border=2, dark="#5E6B51")
+        return buff.getvalue().decode("utf-8")
+    except Exception:  # noqa: BLE001 - never 500 just because QR isn't available
+        return None
+
+
+def _survey_ctx(request: Request, **extra) -> dict:
+    """Context for the standalone public survey page (no sidebar / no login)."""
+    base = {
+        "request": request,
+        "survey": survey_svc,
+        "sections": survey_svc.SECTIONS,
+        "treatments": survey_svc.TREATMENTS,
+        "scale": list(range(survey_svc.SCALE_MIN, survey_svc.SCALE_MAX + 1)),
+        "scale_min_label": survey_svc.SCALE_MIN_LABEL,
+        "scale_max_label": survey_svc.SCALE_MAX_LABEL,
+        "title": survey_svc.TITLE,
+        "intro": survey_svc.INTRO,
+        "submitted": False,
+        "error": None,
+        "src": "link",
+    }
+    base.update(extra)
+    return base
+
+
+@app.get("/survey", response_class=HTMLResponse)
+def survey_public(request: Request):
+    """The anonymous patient survey. Public on purpose."""
+    src = (request.query_params.get("src") or "link").strip().lower()
+    if src not in ("qr", "email", "link"):
+        src = "link"
+    return templates.TemplateResponse("survey_public.html", _survey_ctx(request, src=src))
+
+
+@app.post("/survey/submit", response_class=HTMLResponse)
+async def survey_submit(request: Request):
+    form = await request.form()
+    # Honeypot: real people leave it empty; bots fill it. Pretend success.
+    if (form.get("website") or "").strip():
+        return RedirectResponse("/survey/thanks", status_code=303)
+
+    data = {k: form.get(k) for k in form.keys()}
+    data["treatment"] = form.getlist("treatment")
+    src = (form.get("src") or "link").strip().lower()
+    if src not in ("qr", "email", "link"):
+        src = "link"
+
+    try:
+        cleaned = survey_svc.clean_submission(data)
+    except ValueError:
+        return templates.TemplateResponse(
+            "survey_public.html",
+            _survey_ctx(request, src=src,
+                        error="Please answer at least one question before submitting."),
+            status_code=400,
+        )
+
+    db.add_survey_response(cleaned["answers"], cleaned["treatment"], source=src)
+    return RedirectResponse("/survey/thanks", status_code=303)
+
+
+@app.get("/survey/thanks", response_class=HTMLResponse)
+def survey_thanks(request: Request):
+    return templates.TemplateResponse("survey_public.html", _survey_ctx(request, submitted=True))
+
+
+@app.get("/surveys", response_class=HTMLResponse)
+def surveys_dashboard(request: Request):
+    user, resp = _guard(request, "view_surveys")
+    if resp:
+        return resp
+    responses = db.list_survey_responses()
+    summary = survey_svc.summarize(responses)
+    return templates.TemplateResponse(
+        "surveys.html",
+        _ctx(request, user,
+             summary=summary,
+             public_url=_survey_public_url(),
+             qr_svg=_qr_svg(_survey_public_url("qr")),
+             email_enabled=mailer.enabled(),
+             flash=request.session.pop("surveys_flash", None)),
+    )
+
+
+@app.post("/surveys/email")
+def surveys_email(request: Request, to: str = Form("")):
+    """Email the anonymous survey link to one or more recipients."""
+    user, resp = _guard(request, "view_surveys")
+    if resp:
+        return resp
+    # Split on comma / semicolon / whitespace; keep anything that looks like an email.
+    recipients = [e.strip() for e in re.split(r"[,;\s]+", to or "") if e.strip() and "@" in e]
+    if not recipients:
+        request.session["surveys_flash"] = {"ok": False, "msg": "Enter at least one valid email address."}
+        return RedirectResponse("/surveys", status_code=303)
+    if not mailer.enabled():
+        request.session["surveys_flash"] = {"ok": False,
+            "msg": "Email sending isn't set up yet (IMAP_USER / IMAP_PASSWORD in .env)."}
+        return RedirectResponse("/surveys", status_code=303)
+
+    link = _survey_public_url("email")
+    subject = "We'd love your feedback — Valley Medical Aesthetics"
+    body = (
+        "Hello,\n\n"
+        "Thank you for choosing Valley Medical Aesthetics. We'd really appreciate a "
+        "few minutes of your time to tell us about your experience.\n\n"
+        "The survey is completely anonymous:\n"
+        f"{link}\n\n"
+        "With thanks,\nThe team at Valley Medical Aesthetics"
+    )
+    sent, failed = 0, []
+    for addr in recipients:
+        try:
+            mailer.send_email(addr, subject, body)
+            sent += 1
+        except Exception as exc:  # noqa: BLE001
+            failed.append(f"{addr} ({exc})")
+
+    if sent and not failed:
+        msg = f"Survey link sent to {sent} recipient{'s' if sent != 1 else ''}."
+        request.session["surveys_flash"] = {"ok": True, "msg": msg}
+    elif sent and failed:
+        request.session["surveys_flash"] = {"ok": False,
+            "msg": f"Sent {sent}; couldn't send to: {', '.join(failed)}."}
+    else:
+        request.session["surveys_flash"] = {"ok": False,
+            "msg": f"Couldn't send: {', '.join(failed)}."}
+    return RedirectResponse("/surveys", status_code=303)
+
+
+@app.get("/surveys/qr", response_class=HTMLResponse)
+def surveys_qr_poster(request: Request):
+    """A clean, printable poster with the QR code for the office."""
+    user, resp = _guard(request, "view_surveys")
+    if resp:
+        return resp
+    url = _survey_public_url("qr")
+    svg = _qr_svg(url) or ""
+    html = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Survey QR — Valley Medical Aesthetics</title>
+<style>
+  :root {{ --olive:#7D8B6E; --olive-deep:#5E6B51; --ink:#2A2B27; --cream:#F3EEE7; }}
+  * {{ box-sizing:border-box; }}
+  body {{ margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--cream); color:var(--ink); }}
+  .poster {{ max-width:620px; margin:0 auto; padding:56px 40px; text-align:center;
+    min-height:100vh; display:flex; flex-direction:column; justify-content:center; }}
+  .kicker {{ letter-spacing:.14em; text-transform:uppercase; font-size:.8rem;
+    color:var(--olive-deep); font-weight:700; }}
+  h1 {{ font-family:Georgia,'Times New Roman',serif; font-size:2.3rem; margin:.4rem 0 .2rem; }}
+  p.sub {{ font-size:1.15rem; color:#555; margin:.2rem 0 1.6rem; }}
+  .qr {{ background:#fff; border:1px solid #E2DED6; border-radius:18px; padding:26px;
+    display:inline-block; box-shadow:0 10px 30px rgba(0,0,0,.06); }}
+  .qr svg {{ width:280px; height:280px; display:block; }}
+  .url {{ margin-top:1.3rem; font-size:1rem; color:var(--olive-deep); word-break:break-all; }}
+  .foot {{ margin-top:2rem; font-size:.95rem; color:#777; }}
+  .noprint {{ margin-top:2.2rem; }}
+  .btn {{ background:var(--olive-deep); color:#fff; border:0; border-radius:10px;
+    padding:.7rem 1.4rem; font-size:1rem; cursor:pointer; text-decoration:none; }}
+  @media print {{ .noprint {{ display:none; }} body {{ background:#fff; }} .qr {{ box-shadow:none; }} }}
+</style></head><body>
+  <div class="poster">
+    <div class="kicker">Valley Medical Aesthetics</div>
+    <h1>How did we do?</h1>
+    <p class="sub">Scan the code to share your experience.<br>It's quick and completely anonymous.</p>
+    <div class="qr">{svg if svg else '<p>QR unavailable — update the app to enable it.</p>'}</div>
+    <div class="url">{url}</div>
+    <div class="foot">Your feedback helps us care for you better.</div>
+    <div class="noprint"><button class="btn" onclick="window.print()">Print this poster</button>
+      &nbsp;<a class="btn" href="/surveys" style="background:#8a8f85">Back to results</a></div>
+  </div>
+</body></html>"""
+    return HTMLResponse(html)
+
+
+@app.get("/surveys/export.csv")
+def surveys_export_csv(request: Request):
+    user, resp = _guard(request, "view_surveys")
+    if resp:
+        return resp
+    import csv
+    import io
+    responses = db.list_survey_responses()
+
+    likert = survey_svc.likert_questions()
+    yesno = survey_svc.yesno_questions()
+    textq = survey_svc.text_questions()
+
+    headers = ["response_id", "submitted_at", "source", "treatment"]
+    headers += [q["key"] for q in likert]
+    for q in yesno:
+        headers.append(q["key"])
+        if q.get("explain"):
+            headers.append(q["key"] + "_explain")
+    headers += [q["key"] for q in textq]
+
+    buff = io.StringIO()
+    writer = csv.writer(buff)
+    writer.writerow(headers)
+    for r in responses:
+        a = r["answers"]
+        row = [r["id"], r.get("created_at"), r.get("source") or "",
+               "; ".join(r.get("treatment") or [])]
+        row += [a.get(q["key"], "") for q in likert]
+        for q in yesno:
+            row.append(a.get(q["key"], ""))
+            if q.get("explain"):
+                row.append(a.get(q["key"] + "_explain", ""))
+        row += [a.get(q["key"], "") for q in textq]
+        writer.writerow(row)
+
+    return HTMLResponse(
+        content=buff.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="patient-surveys.csv"'},
+    )

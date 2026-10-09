@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}Surveys · Valley Medical{% endblock %}
+{% block nav %}surveys{% endblock %}
+{% block content %}
+  <div class="page-head" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+    <h1 style="margin:0">Patient Satisfaction</h1>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <a class="btn ghost" href="/surveys/qr" target="_blank" rel="noopener">QR poster</a>
+      <a class="btn ghost" href="/surveys/export.csv">Export CSV</a>
+      <a class="btn" href="/survey" target="_blank" rel="noopener">Preview survey</a>
+    </div>
+  </div>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  {# ---- Headline numbers ---- #}
+  <div class="sv-stats">
+    <div class="card sv-stat">
+      <div class="sv-num">{{ summary.total }}</div>
+      <div class="sv-lab">Responses</div>
+    </div>
+    <div class="card sv-stat">
+      <div class="sv-num">{{ summary.overall_avg if summary.overall_avg is not none else '—' }}{% if summary.overall_avg is not none %}<span class="sv-of">/5</span>{% endif %}</div>
+      <div class="sv-lab">Overall satisfaction</div>
+    </div>
+    <div class="card sv-stat">
+      <div class="sv-num">{% if summary.refer and summary.refer.answered %}{{ summary.refer.yes_pct }}%{% else %}—{% endif %}</div>
+      <div class="sv-lab">Would refer a friend</div>
+    </div>
+  </div>
+
+  {# ---- Share the survey ---- #}
+  <div class="card">
+    <h2 class="sv-h2">Share the survey</h2>
+    <p class="muted" style="margin:.1rem 0 .8rem">Anonymous — no patient details are collected. Put the QR code in the
+      office, or email the link.</p>
+    <div class="sv-share">
+      <div class="sv-share-main">
+        <label class="sv-field"><span>Public link</span>
+          <div style="display:flex;gap:.4rem">
+            <input id="svLink" type="text" readonly value="{{ public_url }}">
+            <button class="btn secondary" type="button" onclick="svCopy()">Copy</button>
+          </div>
+        </label>
+
+        <form method="post" action="/surveys/email" class="sv-field" style="margin-top:1rem">
+          <span>Email the link</span>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+            <input type="text" name="to" placeholder="patient@email.com, another@email.com" style="flex:1;min-width:220px"
+                   {{ '' if email_enabled else 'disabled' }}>
+            <button class="btn" type="submit" {{ '' if email_enabled else 'disabled' }}>Send</button>
+          </div>
+          {% if not email_enabled %}
+          <span class="muted" style="font-size:.8rem">Email sending isn't set up yet (IMAP_USER / IMAP_PASSWORD in .env).</span>
+          {% else %}
+          <span class="muted" style="font-size:.8rem">Separate multiple addresses with commas. Addresses are not stored.</span>
+          {% endif %}
+        </form>
+      </div>
+      <div class="sv-qr">
+        {% if qr_svg %}{{ qr_svg|safe }}{% else %}<p class="muted">QR unavailable.</p>{% endif %}
+        <a class="btn ghost" href="/surveys/qr" target="_blank" rel="noopener" style="margin-top:.5rem">Printable poster</a>
+      </div>
+    </div>
+  </div>
+
+  {% if summary.total == 0 %}
+  <div class="card" style="text-align:center;padding:2.4rem">
+    <p class="muted" style="font-size:1.05rem;margin:0">No responses yet.</p>
+    <p class="muted" style="margin:.4rem 0 0">Share the QR code or link above — results will appear here automatically.</p>
+  </div>
+  {% else %}
+
+  {# ---- Section averages ---- #}
+  <div class="card">
+    <h2 class="sv-h2">How we're scoring, by section</h2>
+    {% for s in summary.section_stats %}
+    <div class="sv-bar-row">
+      <div class="sv-bar-label">{{ s.title }}</div>
+      <div class="sv-bar"><div class="sv-bar-fill" style="width:{{ s.pct }}%"></div></div>
+      <div class="sv-bar-val">{{ s.avg if s.avg is not none else '—' }}{% if s.avg is not none %}<span class="sv-of">/5</span>{% endif %}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {# ---- Per-question averages ---- #}
+  <div class="card">
+    <h2 class="sv-h2">Every rated question</h2>
+    {% set ns = namespace(section='') %}
+    {% for q in summary.likert_stats %}
+      {% if q.section != ns.section %}
+        {% set ns.section = q.section %}
+        <div class="sv-subhead">{{ q.section }}</div>
+      {% endif %}
+      <div class="sv-bar-row">
+        <div class="sv-bar-label sv-q">{{ q.text }}</div>
+        <div class="sv-bar"><div class="sv-bar-fill" style="width:{{ q.pct }}%"></div></div>
+        <div class="sv-bar-val">{{ q.avg if q.avg is not none else '—' }}<span class="sv-cnt">({{ q.count }})</span></div>
+      </div>
+    {% endfor %}
+    <p class="muted" style="font-size:.78rem;margin:.6rem 0 0">Number in brackets = how many people answered that question.</p>
+  </div>
+
+  {# ---- Yes / No ---- #}
+  <div class="card">
+    <h2 class="sv-h2">Yes / No questions</h2>
+    {% for y in summary.yesno_stats %}
+    <div class="sv-yn-row">
+      <div class="sv-yn-text">{{ y.text }}</div>
+      <div class="sv-yn-bar">
+        <div class="sv-yn-fill" style="width:{{ y.yes_pct }}%">{% if y.yes_pct >= 18 %}{{ y.yes_pct }}% yes{% endif %}</div>
+        {% if y.yes_pct < 18 %}<span class="sv-yn-out">{{ y.yes_pct }}% yes</span>{% endif %}
+      </div>
+      <div class="sv-yn-counts">{{ y.yes }} yes · {{ y.no }} no</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {# ---- Treatment mix ---- #}
+  {% if summary.treatment_counts %}
+  <div class="card">
+    <h2 class="sv-h2">Treatment mix</h2>
+    <div style="display:flex;gap:1.2rem;flex-wrap:wrap">
+      {% for name, n in summary.treatment_counts.items() %}
+      <div><span class="badge">{{ n }}</span> &nbsp;{{ name }}</div>
+      {% endfor %}
+    </div>
+    <p class="muted" style="font-size:.78rem;margin:.6rem 0 0">Patients can select more than one, or none.</p>
+  </div>
+  {% endif %}
+
+  {# ---- Comments ---- #}
+  <div class="card">
+    <h2 class="sv-h2">Comments &amp; open feedback</h2>
+    {% if summary.comments %}
+      {% for c in summary.comments %}
+      <div class="sv-comment">
+        <div class="sv-comment-meta">{{ c.created_at }}{% if c.treatment %} · {{ c.treatment|join(', ') }}{% endif %}</div>
+        {% for item in c.entries %}
+        <div class="sv-comment-item"><span class="sv-comment-q">{{ item.q }}</span>
+          <div class="sv-comment-a">{{ item.a }}</div></div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted" style="margin:0">No written comments yet.</p>
+    {% endif %}
+  </div>
+
+  {% endif %}
+
+  <style>
+    .sv-stats{ display:grid; grid-template-columns:repeat(3,1fr); gap:.9rem; margin:.4rem 0 0; }
+    .sv-stat{ text-align:center; padding:1.3rem 1rem; }
+    .sv-num{ font-size:2.3rem; font-weight:700; color:#5E6B51; line-height:1; }
+    .sv-of{ font-size:1.1rem; color:var(--muted); font-weight:600; margin-left:.1rem; }
+    .sv-lab{ color:var(--muted); font-size:.85rem; margin-top:.4rem; }
+    .sv-h2{ font-size:1.05rem; margin:.1rem 0 .6rem; color:#5E6B51; }
+    .sv-share{ display:flex; gap:1.6rem; flex-wrap:wrap; align-items:flex-start; }
+    .sv-share-main{ flex:1; min-width:260px; }
+    .sv-field{ display:flex; flex-direction:column; gap:.3rem; }
+    .sv-field > span{ font-size:.82rem; font-weight:600; color:var(--muted); }
+    .sv-field input{ width:100%; box-sizing:border-box; padding:.55rem .7rem; border:1px solid var(--line);
+      border-radius:8px; background:var(--surface,#fff); color:inherit; font-size:.95rem; }
+    .sv-qr{ text-align:center; display:flex; flex-direction:column; align-items:center; }
+    .sv-qr svg{ width:150px; height:150px; border:1px solid var(--line); border-radius:10px; background:#fff; padding:8px; }
+    .sv-bar-row{ display:flex; align-items:center; gap:.8rem; padding:.42rem 0; }
+    .sv-bar-label{ flex:0 0 38%; font-size:.9rem; }
+    .sv-bar-label.sv-q{ flex-basis:46%; }
+    .sv-bar{ flex:1; height:12px; background:#eee7dd; border-radius:999px; overflow:hidden; }
+    .sv-bar-fill{ height:100%; background:linear-gradient(90deg,#9aa988,#5E6B51); border-radius:999px; }
+    .sv-bar-val{ flex:0 0 auto; min-width:64px; text-align:right; font-weight:700; color:#5E6B51; font-size:.92rem; }
+    .sv-cnt{ color:var(--muted); font-weight:400; font-size:.78rem; margin-left:.2rem; }
+    .sv-subhead{ font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted);
+      font-weight:700; margin:.8rem 0 .2rem; }
+    .sv-yn-row{ display:flex; align-items:center; gap:.8rem; padding:.45rem 0; border-top:1px solid var(--line); }
+    .sv-yn-row:first-of-type{ border-top:0; }
+    .sv-yn-text{ flex:0 0 46%; font-size:.9rem; }
+    .sv-yn-bar{ flex:1; height:22px; background:#eee7dd; border-radius:6px; position:relative; overflow:hidden; display:flex; align-items:center; }
+    .sv-yn-fill{ height:100%; background:#7D8B6E; color:#fff; font-size:.75rem; font-weight:700;
+      display:flex; align-items:center; padding-left:.5rem; border-radius:6px 0 0 6px; white-space:nowrap; }
+    .sv-yn-out{ position:absolute; left:.5rem; font-size:.75rem; font-weight:700; color:#5E6B51; }
+    .sv-yn-counts{ flex:0 0 auto; min-width:92px; text-align:right; font-size:.82rem; color:var(--muted); }
+    .sv-comment{ border-top:1px solid var(--line); padding:.8rem 0; }
+    .sv-comment:first-of-type{ border-top:0; }
+    .sv-comment-meta{ font-size:.76rem; color:var(--muted); margin-bottom:.35rem; }
+    .sv-comment-item{ margin:.35rem 0; }
+    .sv-comment-q{ font-size:.8rem; color:var(--muted); font-weight:600; }
+    .sv-comment-a{ font-size:.95rem; white-space:pre-wrap; }
+    @media (max-width:640px){
+      .sv-stats{ grid-template-columns:1fr; }
+      .sv-bar-label, .sv-bar-label.sv-q, .sv-yn-text{ flex-basis:100%; }
+      .sv-bar-row, .sv-yn-row{ flex-wrap:wrap; }
+    }
+  </style>
+
+  <script>
+    function svCopy(){
+      var el = document.getElementById('svLink');
+      el.select(); el.setSelectionRange(0, 99999);
+      try{ document.execCommand('copy'); }catch(e){}
+      if(navigator.clipboard){ navigator.clipboard.writeText(el.value).catch(function(){}); }
+    }
+  </script>
+{% endblock %}
