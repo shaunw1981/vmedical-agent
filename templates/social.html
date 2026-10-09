@@ -8,6 +8,12 @@
   {% else %}<span class="trend flat">— no change</span>{% endif %}
 {% endmacro %}
 
+{% macro tiletrend(value) %}
+  {% if value > 0 %}<span class="trend up">▲ {{ fmt(value) }} vs prev 7d</span>
+  {% elif value < 0 %}<span class="trend down">▼ {{ fmt(value|abs) }} vs prev 7d</span>
+  {% else %}<span class="trend flat">— no change</span>{% endif %}
+{% endmacro %}
+
 {% block content %}
   <div class="page-head">
     <h1 style="margin:0">Social media</h1>
@@ -55,17 +61,17 @@
       <div class="stat-tile">
         <div class="n">{{ fmt(social.totals.reach) }}</div>
         <div class="k">People reached</div>
-        <div class="win">{{ social.window }}</div>
+        <div class="win">{{ tiletrend(social.totals.reach_change) }}</div>
       </div>
       <div class="stat-tile">
         <div class="n">{{ fmt(social.totals.impressions) }}</div>
         <div class="k">Times seen (impressions)</div>
-        <div class="win">{{ social.window }}</div>
+        <div class="win">{{ tiletrend(social.totals.impressions_change) }}</div>
       </div>
       <div class="stat-tile">
         <div class="n">{{ fmt(social.totals.engagement) }}</div>
         <div class="k">Interactions (likes, comments, shares)</div>
-        <div class="win">{{ social.window }}</div>
+        <div class="win">{{ tiletrend(social.totals.engagement_change) }}</div>
       </div>
       <div class="stat-tile">
         <div class="n">{{ fmt(social.totals.followers) }}</div>
@@ -81,6 +87,52 @@
       time and refresh.</div>
     {% endif %}
 
+    {% if social.accounts_flat %}
+    {# ---- Charts ---- #}
+    <div class="sc-charts">
+      <div class="card sc-chart-main">
+        <div class="sc-chart-head">
+          <h2 class="sc-h2">By page</h2>
+          <div class="sc-toggle" id="metricToggle">
+            <button class="on" data-metric="reach">Reach</button>
+            <button data-metric="impressions">Impressions</button>
+            <button data-metric="engagement">Engagement</button>
+            <button data-metric="followers">Followers</button>
+            <button data-metric="posts">Posts</button>
+          </div>
+        </div>
+        <div class="sc-canvas-wrap"><canvas id="pageChart"></canvas></div>
+      </div>
+
+      <div class="card sc-chart-side">
+        <h2 class="sc-h2">Followers by platform</h2>
+        <div class="sc-canvas-wrap donut"><canvas id="platformChart"></canvas></div>
+      </div>
+    </div>
+
+    {# ---- Platform rollup ---- #}
+    {% if social.platforms %}
+    <div class="card">
+      <h2 class="sc-h2">Platform totals</h2>
+      <div class="sc-plat-row">
+        {% for p in social.platforms %}
+        <div class="sc-plat" data-plat="{{ p.key }}">
+          <div class="sc-plat-name"><span class="sc-dot" data-plat="{{ p.key }}"></span>{{ p.label }}
+            <span class="muted" style="font-weight:400">· {{ p.accounts }} page{{ 's' if p.accounts != 1 }}</span></div>
+          <div class="sc-plat-metrics">
+            <div><b>{{ fmt(p.followers) }}</b><span>followers</span></div>
+            <div><b>{{ fmt(p.reach) }}</b><span>reach</span></div>
+            <div><b>{{ fmt(p.impressions) }}</b><span>impressions</span></div>
+            <div><b>{{ fmt(p.engagement) }}</b><span>engagement</span></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    {% endif %}
+
+    {# ---- Per-account detail ---- #}
     {% for loc in social.locations %}
       <div class="loc-head">{{ loc.label }}</div>
       <div class="acct-grid">
@@ -134,5 +186,95 @@
     <p class="note-inline">Numbers come from GoHighLevel's Social Planner analytics
       ({{ social.window }}). Google Business pages report fewer post-level metrics than
       Facebook and Instagram, so some Google figures may show as zero.</p>
+
+    {% if social.accounts_flat %}
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <script>
+    (function(){
+      if(typeof Chart === "undefined") return;
+      var accounts = {{ social.accounts_flat|tojson }};
+      var platforms = {{ social.platforms|tojson }};
+      var PCOLOR = { facebook:"#1877F2", instagram:"#E1306C", google:"#34A853",
+        linkedin:"#0A66C2", youtube:"#FF0000", tiktok:"#111111", pinterest:"#E60023",
+        twitter:"#1DA1F2", threads:"#111111" };
+      function col(k){ return PCOLOR[k] || "#7D8B6E"; }
+      var olive = "#5E6B51", ink = "#2A2B27", grid = "rgba(0,0,0,.06)";
+      Chart.defaults.font.family = "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif";
+      Chart.defaults.color = "#5b5f56";
+
+      // colour the platform-rollup dots to match the charts
+      document.querySelectorAll(".sc-dot[data-plat]").forEach(function(d){ d.style.background = col(d.dataset.plat); });
+
+      // ---- By-page bar chart with metric toggle ----
+      var labels = accounts.map(function(a){ return a.name + (a.platform ? " · " + a.platform : ""); });
+      var metric = "reach";
+      function dataFor(m){ return accounts.map(function(a){ return a[m] || 0; }); }
+      function colorsFor(){ return accounts.map(function(a){ return col(a.platform_key); }); }
+      var pageCtx = document.getElementById("pageChart").getContext("2d");
+      var pageChart = new Chart(pageCtx, {
+        type: "bar",
+        data: { labels: labels, datasets: [{ label: "Reach", data: dataFor(metric),
+          backgroundColor: colorsFor(), borderRadius: 6, maxBarThickness: 46 }] },
+        options: {
+          indexAxis: "y", responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: function(c){ return " " + c.parsed.x.toLocaleString(); } } } },
+          scales: { x: { beginAtZero: true, grid: { color: grid },
+              ticks: { callback: function(v){ return Number(v).toLocaleString(); } } },
+            y: { grid: { display: false } } }
+        }
+      });
+      document.querySelectorAll("#metricToggle button").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          document.querySelectorAll("#metricToggle button").forEach(function(b){ b.classList.remove("on"); });
+          btn.classList.add("on");
+          metric = btn.dataset.metric;
+          pageChart.data.datasets[0].data = dataFor(metric);
+          pageChart.data.datasets[0].label = btn.textContent;
+          pageChart.update();
+        });
+      });
+
+      // ---- Followers-by-platform doughnut ----
+      if(platforms && platforms.length){
+        var pCtx = document.getElementById("platformChart").getContext("2d");
+        new Chart(pCtx, {
+          type: "doughnut",
+          data: { labels: platforms.map(function(p){ return p.label; }),
+            datasets: [{ data: platforms.map(function(p){ return p.followers || 0; }),
+              backgroundColor: platforms.map(function(p){ return col(p.key); }),
+              borderColor: "#fff", borderWidth: 2 }] },
+          options: { responsive: true, maintainAspectRatio: false, cutout: "62%",
+            plugins: { legend: { position: "bottom", labels: { boxWidth: 12, padding: 12 } },
+              tooltip: { callbacks: { label: function(c){
+                return " " + c.label + ": " + Number(c.parsed).toLocaleString() + " followers"; } } } } }
+        });
+      }
+    })();
+    </script>
+    {% endif %}
   {% endif %}
+
+  <style>
+    .trend.up{ color:#4e7a3a; } .trend.down{ color:#b0472f; } .trend.flat{ color:var(--muted); }
+    .stat-tile .win .trend{ font-size:.74rem; font-weight:600; }
+    .sc-charts{ display:grid; grid-template-columns:1.7fr 1fr; gap:1.1rem; margin-bottom:1.1rem; }
+    .sc-h2{ font-size:1.02rem; margin:0 0 .6rem; color:#5E6B51; }
+    .sc-chart-head{ display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; margin-bottom:.3rem; }
+    .sc-toggle{ display:flex; flex-wrap:wrap; gap:.3rem; }
+    .sc-toggle button{ border:1px solid var(--line); background:#fbfaf7; color:#4b4f46; font-size:.8rem;
+      font-weight:600; padding:.3rem .6rem; border-radius:999px; cursor:pointer; }
+    .sc-toggle button.on{ background:#5E6B51; color:#fff; border-color:#5E6B51; }
+    .sc-canvas-wrap{ position:relative; height:320px; }
+    .sc-canvas-wrap.donut{ height:300px; }
+    .sc-plat-row{ display:grid; grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr)); gap:.9rem; }
+    .sc-plat{ border:1px solid var(--line); border-radius:10px; padding:.8rem .9rem; background:#fcfbf9; }
+    .sc-plat-name{ font-weight:700; display:flex; align-items:center; gap:.45rem; margin-bottom:.5rem; }
+    .sc-dot{ width:11px; height:11px; border-radius:50%; background:#7D8B6E; display:inline-block; }
+    .sc-plat-metrics{ display:grid; grid-template-columns:1fr 1fr; gap:.45rem .8rem; }
+    .sc-plat-metrics > div{ display:flex; flex-direction:column; }
+    .sc-plat-metrics b{ font-size:1.05rem; color:#2A2B27; }
+    .sc-plat-metrics span{ font-size:.74rem; color:var(--muted); }
+    @media (max-width:900px){ .sc-charts{ grid-template-columns:1fr; } }
+  </style>
 {% endblock %}

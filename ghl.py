@@ -254,7 +254,10 @@ def social_overview(now: Optional[datetime] = None,
     now = now or datetime.now(timezone.utc)
     locations_out: list[dict] = []
     totals = {"accounts": 0, "reach": 0, "impressions": 0, "engagement": 0,
-              "followers": 0, "posts": 0}
+              "followers": 0, "posts": 0,
+              "reach_change": 0, "impressions_change": 0, "engagement_change": 0}
+    platform_roll: dict[str, dict] = {}
+    accounts_flat: list[dict] = []
     stats_ok = False
 
     for loc in config.GHL_LOCATIONS:
@@ -294,6 +297,28 @@ def social_overview(now: Optional[datetime] = None,
                 totals["engagement"] += perf["engagement"]["value"]
                 totals["followers"] += perf["followers"]
                 totals["posts"] += perf["posts"]
+                totals["reach_change"] += perf["reach"]["change"]
+                totals["impressions_change"] += perf["impressions"]["change"]
+                totals["engagement_change"] += perf["engagement"]["change"]
+
+                pkey = (_first(a, "platform", default="") or "").lower()
+                roll = platform_roll.setdefault(pkey, {
+                    "key": pkey, "label": _platform_label(pkey), "accounts": 0,
+                    "reach": 0, "impressions": 0, "engagement": 0, "followers": 0, "posts": 0})
+                roll["accounts"] += 1
+                roll["reach"] += perf["reach"]["value"]
+                roll["impressions"] += perf["impressions"]["value"]
+                roll["engagement"] += perf["engagement"]["value"]
+                roll["followers"] += perf["followers"]
+                roll["posts"] += perf["posts"]
+
+                accounts_flat.append({
+                    "name": name, "platform": platform, "platform_key": pkey,
+                    "location": loc["label"] or loc_id[:6],
+                    "reach": perf["reach"]["value"], "impressions": perf["impressions"]["value"],
+                    "engagement": perf["engagement"]["value"], "followers": perf["followers"],
+                    "posts": perf["posts"],
+                })
 
             aposts = by_account.get(aid, [])
             pub_times = [t for t in (_post_time(p) for p in aposts if _is_published(p)) if t]
@@ -319,9 +344,13 @@ def social_overview(now: Optional[datetime] = None,
         rows.sort(key=lambda r: (r["platform"], r["name"]))
         locations_out.append({"label": loc["label"] or f"Location {loc_id[:6]}", "accounts": rows})
 
+    platforms = sorted(platform_roll.values(), key=lambda p: p["followers"], reverse=True)
+
     return {
         "locations": locations_out,
         "totals": totals,
+        "platforms": platforms,
+        "accounts_flat": accounts_flat,
         "stats_ok": stats_ok,
         # GHL's analytics API only reports the rolling 7-day comparison, so the
         # window is fixed regardless of any date range picked in the UI.
