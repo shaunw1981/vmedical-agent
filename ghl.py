@@ -120,13 +120,20 @@ def get_accounts(location_id: str) -> list[dict]:
     return (body.get("accounts") if isinstance(body, dict) else None) or []
 
 
-def list_posts(location_id: str, limit: int = 100,
+def list_posts(location_id: str, accounts: Optional[list] = None, limit: int = 100,
                days_back: int = 120, days_forward: int = 45) -> list[dict]:
-    """Recent + upcoming posts. All DTO fields must be strings (GHL requirement)."""
+    """
+    Recent + upcoming posts. GoHighLevel REQUIRES a non-empty `accounts` list
+    (account ids) — otherwise it returns 422 ("accounts should not be empty").
+    Scalar DTO fields must be strings; `accounts` is an array of id strings.
+    """
+    account_ids = [str(a) for a in (accounts or []) if a]
+    if not account_ids:
+        return []
     now = datetime.now(timezone.utc)
     body = {
         "type": "all",
-        "accounts": "",
+        "accounts": account_ids,
         "skip": "0",
         "limit": str(limit),
         "fromDate": _iso(now - timedelta(days=days_back)),
@@ -155,10 +162,10 @@ def get_statistics(location_id: str, profile_ids: list[str],
     body: dict = {"profileIds": profile_ids}
     if platforms:
         body["platforms"] = platforms
-    if start and end:
-        # Best-guess field names/format (epoch ms); confirm via /social?debug=1.
-        body["startDate"] = _ms(start)
-        body["endDate"] = _ms(end)
+    # NOTE: GoHighLevel's statistics endpoint does NOT accept a custom date
+    # range — sending startDate/endDate returns 422 ("property startDate should
+    # not exist"). It always reports the last 7 days vs the previous 7, so the
+    # start/end args are intentionally ignored here.
     data = _post("/social-media-posting/statistics", body, params={"locationId": location_id})
     return data.get("results", data) if isinstance(data, dict) else {}
 
@@ -255,9 +262,13 @@ def social_overview(now: Optional[datetime] = None,
         accounts = get_accounts(loc_id)
 
         # Posting context (last posted / scheduled). Non-fatal if it fails.
+        # GHL's posts/list needs the account ids explicitly.
+        account_ids = [str(_first(a, "id", "_id", default="")) for a in accounts
+                       if _first(a, "deleted", default=False) is not True]
+        account_ids = [x for x in account_ids if x]
         by_account: dict[str, list[dict]] = {}
         try:
-            for p in list_posts(loc_id):
+            for p in list_posts(loc_id, accounts=account_ids):
                 for aid in _post_accounts(p):
                     by_account.setdefault(aid, []).append(p)
         except Exception:  # noqa: BLE001
@@ -312,7 +323,9 @@ def social_overview(now: Optional[datetime] = None,
         "locations": locations_out,
         "totals": totals,
         "stats_ok": stats_ok,
-        "window": window_label or "Last 7 days vs previous 7",
+        # GHL's analytics API only reports the rolling 7-day comparison, so the
+        # window is fixed regardless of any date range picked in the UI.
+        "window": "Last 7 days vs previous 7 (GoHighLevel standard)",
         "generated_at": now.strftime("%b %-d, %Y at %-I:%M %p UTC"),
     }
 
@@ -626,6 +639,7 @@ def raw_debug(start: Optional[datetime] = None, end: Optional[datetime] = None) 
         lid = loc["id"]
         entry: dict = {"location": loc}
         profile_ids, platforms = [], set()
+        accts: list[dict] = []
         try:
             accts = get_accounts(lid)
             entry["accounts_raw"] = _redact({"count": len(accts), "accounts": accts})
@@ -637,11 +651,10 @@ def raw_debug(start: Optional[datetime] = None, end: Optional[datetime] = None) 
                     platforms.add(plat)
         except Exception as exc:  # noqa: BLE001
             entry["accounts_error"] = str(exc)
+        account_ids = [str(_first(a, "id", "_id", default="")) for a in accts]
+        account_ids = [x for x in account_ids if x]
         stat_body: dict = {"profileIds": profile_ids, "platforms": list(platforms)}
-        if start and end:
-            stat_body["startDate"] = _ms(start)
-            stat_body["endDate"] = _ms(end)
-        entry["statistics_request"] = {k: v for k, v in stat_body.items() if k in ("startDate", "endDate")}
+        entry["statistics_request"] = {"profileIds": len(profile_ids), "platforms": list(platforms)}
         try:
             entry["statistics_raw"] = _redact(
                 _post("/social-media-posting/statistics", stat_body, params={"locationId": lid})
@@ -649,7 +662,7 @@ def raw_debug(start: Optional[datetime] = None, end: Optional[datetime] = None) 
         except Exception as exc:  # noqa: BLE001
             entry["statistics_error"] = str(exc)
         try:
-            entry["posts_raw"] = _redact({"posts": list_posts(lid, limit=3)[:3]})
+            entry["posts_raw"] = _redact({"posts": list_posts(lid, accounts=account_ids, limit=3)[:3]})
         except Exception as exc:  # noqa: BLE001
             entry["posts_error"] = str(exc)
         out.append(entry)
