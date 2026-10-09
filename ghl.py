@@ -17,6 +17,7 @@ scopes. See config.py / .env.example.
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
@@ -248,16 +249,63 @@ def _freshness(days_since: Optional[int]) -> str:
     return "stale"
 
 
+# Both clinics' pages live under one GHL location, distinguished by page name
+# ("… PEI" / "…pei"). This classifies each page into a clinic so the charts can
+# be split by location. Override with GHL_PEI_MATCH if the naming ever changes.
+_PEI_MATCH = os.environ.get("GHL_PEI_MATCH", "pei").strip().lower() or "pei"
+_CLINIC_LABELS = {"pei": "Valley Medical — PEI (Summerside)",
+                  "main": "Valley Medical — Kentville"}
+_CLINIC_ORDER = ["main", "pei"]
+
+
+def _clinic_of(name: str) -> str:
+    norm = re.sub(r"[^a-z0-9]", "", (name or "").lower())
+    return "pei" if _PEI_MATCH in norm else "main"
+
+
+def _new_totals() -> dict:
+    return {"accounts": 0, "reach": 0, "impressions": 0, "engagement": 0,
+            "followers": 0, "posts": 0,
+            "reach_change": 0, "impressions_change": 0, "engagement_change": 0}
+
+
 def social_overview(now: Optional[datetime] = None,
                     start: Optional[datetime] = None, end: Optional[datetime] = None,
                     window_label: Optional[str] = None) -> dict:
     now = now or datetime.now(timezone.utc)
     locations_out: list[dict] = []
-    totals = {"accounts": 0, "reach": 0, "impressions": 0, "engagement": 0,
-              "followers": 0, "posts": 0,
-              "reach_change": 0, "impressions_change": 0, "engagement_change": 0}
+    totals = _new_totals()
     platform_roll: dict[str, dict] = {}
     accounts_flat: list[dict] = []
+    # Per-clinic buckets (split charts by location).
+    clinic_buckets: dict[str, dict] = {}
+
+    def _clinic(key: str) -> dict:
+        return clinic_buckets.setdefault(key, {
+            "key": key, "label": _CLINIC_LABELS.get(key, key),
+            "totals": _new_totals(), "platform_roll": {}, "accounts_flat": [], "rows": []})
+
+    def _roll_into(container: dict, pkey: str, perf: dict) -> None:
+        roll = container.setdefault(pkey, {
+            "key": pkey, "label": _platform_label(pkey), "accounts": 0,
+            "reach": 0, "impressions": 0, "engagement": 0, "followers": 0, "posts": 0})
+        roll["accounts"] += 1
+        roll["reach"] += perf["reach"]["value"]
+        roll["impressions"] += perf["impressions"]["value"]
+        roll["engagement"] += perf["engagement"]["value"]
+        roll["followers"] += perf["followers"]
+        roll["posts"] += perf["posts"]
+
+    def _add_totals(store: dict, perf: dict) -> None:
+        store["reach"] += perf["reach"]["value"]
+        store["impressions"] += perf["impressions"]["value"]
+        store["engagement"] += perf["engagement"]["value"]
+        store["followers"] += perf["followers"]
+        store["posts"] += perf["posts"]
+        store["reach_change"] += perf["reach"]["change"]
+        store["impressions_change"] += perf["impressions"]["change"]
+        store["engagement_change"] += perf["engagement"]["change"]
+
     stats_ok = False
 
     for loc in config.GHL_LOCATIONS:
@@ -286,39 +334,29 @@ def social_overview(now: Optional[datetime] = None,
             platform = _platform_label(_first(a, "platform", default=""))
             avatar = _first(a, "avatar", "picture", default="")
 
+            clinic_key = _clinic_of(name)
+            cb = _clinic(clinic_key)
+
             try:
                 perf = _stats_for(loc_id, a, start=start, end=end)
             except Exception:  # noqa: BLE001
                 perf = None
+            pkey = (_first(a, "platform", default="") or "").lower()
             if perf:
                 stats_ok = True
-                totals["reach"] += perf["reach"]["value"]
-                totals["impressions"] += perf["impressions"]["value"]
-                totals["engagement"] += perf["engagement"]["value"]
-                totals["followers"] += perf["followers"]
-                totals["posts"] += perf["posts"]
-                totals["reach_change"] += perf["reach"]["change"]
-                totals["impressions_change"] += perf["impressions"]["change"]
-                totals["engagement_change"] += perf["engagement"]["change"]
-
-                pkey = (_first(a, "platform", default="") or "").lower()
-                roll = platform_roll.setdefault(pkey, {
-                    "key": pkey, "label": _platform_label(pkey), "accounts": 0,
-                    "reach": 0, "impressions": 0, "engagement": 0, "followers": 0, "posts": 0})
-                roll["accounts"] += 1
-                roll["reach"] += perf["reach"]["value"]
-                roll["impressions"] += perf["impressions"]["value"]
-                roll["engagement"] += perf["engagement"]["value"]
-                roll["followers"] += perf["followers"]
-                roll["posts"] += perf["posts"]
-
-                accounts_flat.append({
+                _add_totals(totals, perf)
+                _add_totals(cb["totals"], perf)
+                _roll_into(platform_roll, pkey, perf)
+                _roll_into(cb["platform_roll"], pkey, perf)
+                flat = {
                     "name": name, "platform": platform, "platform_key": pkey,
-                    "location": loc["label"] or loc_id[:6],
+                    "clinic": _CLINIC_LABELS.get(clinic_key, clinic_key),
                     "reach": perf["reach"]["value"], "impressions": perf["impressions"]["value"],
                     "engagement": perf["engagement"]["value"], "followers": perf["followers"],
                     "posts": perf["posts"],
-                })
+                }
+                accounts_flat.append(flat)
+                cb["accounts_flat"].append(flat)
 
             aposts = by_account.get(aid, [])
             pub_times = [t for t in (_post_time(p) for p in aposts if _is_published(p)) if t]
@@ -326,10 +364,10 @@ def social_overview(now: Optional[datetime] = None,
             last_post = max(pub_times) if pub_times else None
             days_since = (now - last_post).days if last_post else None
 
-            rows.append({
+            row = {
                 "name": name,
                 "platform": platform,
-                "platform_key": (_first(a, "platform", default="") or "").lower(),
+                "platform_key": pkey,
                 "avatar": avatar,
                 "perf": perf,
                 "expired": _first(a, "isExpired", default=False) is True,
@@ -338,16 +376,35 @@ def social_overview(now: Optional[datetime] = None,
                 "freshness": _freshness(days_since),
                 "scheduled": len(sched),
                 "next_scheduled_at": min(sched).strftime("%b %-d, %Y") if sched else None,
-            })
+            }
+            rows.append(row)
+            cb["rows"].append(row)
             totals["accounts"] += 1
+            cb["totals"]["accounts"] += 1
 
         rows.sort(key=lambda r: (r["platform"], r["name"]))
         locations_out.append({"label": loc["label"] or f"Location {loc_id[:6]}", "accounts": rows})
 
     platforms = sorted(platform_roll.values(), key=lambda p: p["followers"], reverse=True)
 
+    # Finalize per-clinic groupings, in a stable order (Kentville then PEI).
+    clinics_out = []
+    for key in _CLINIC_ORDER + [k for k in clinic_buckets if k not in _CLINIC_ORDER]:
+        cb = clinic_buckets.get(key)
+        if not cb:
+            continue
+        cb["rows"].sort(key=lambda r: (r["platform"], r["name"]))
+        clinics_out.append({
+            "key": key, "label": cb["label"], "totals": cb["totals"],
+            "platforms": sorted(cb["platform_roll"].values(),
+                                key=lambda p: p["followers"], reverse=True),
+            "accounts_flat": cb["accounts_flat"], "accounts": cb["rows"],
+        })
+
     return {
         "locations": locations_out,
+        "clinics": clinics_out,
+        "multi_clinic": len(clinics_out) > 1,
         "totals": totals,
         "platforms": platforms,
         "accounts_flat": accounts_flat,

@@ -88,52 +88,63 @@
     {% endif %}
 
     {% if social.accounts_flat %}
-    {# ---- Charts ---- #}
-    <div class="sc-charts">
-      <div class="card sc-chart-main">
-        <div class="sc-chart-head">
-          <h2 class="sc-h2">By page</h2>
-          <div class="sc-toggle" id="metricToggle">
-            <button class="on" data-metric="reach">Reach</button>
-            <button data-metric="impressions">Impressions</button>
-            <button data-metric="engagement">Engagement</button>
-            <button data-metric="followers">Followers</button>
-            <button data-metric="posts">Posts</button>
-          </div>
-        </div>
-        <div class="sc-canvas-wrap"><canvas id="pageChart"></canvas></div>
-      </div>
+    {# ---- Charts, split by clinic location ---- #}
+    {% set chart_groups = social.clinics if social.multi_clinic else
+       [{'key':'all','label':'All pages','accounts_flat':social.accounts_flat,'platforms':social.platforms,'totals':social.totals}] %}
 
-      <div class="card sc-chart-side">
-        <h2 class="sc-h2">Followers by platform</h2>
-        <div class="sc-canvas-wrap donut"><canvas id="platformChart"></canvas></div>
+    <div class="sc-metric-bar">
+      <span class="sc-metric-label">Compare by</span>
+      <div class="sc-toggle" id="metricToggle">
+        <button class="on" data-metric="reach">Reach</button>
+        <button data-metric="impressions">Impressions</button>
+        <button data-metric="engagement">Engagement</button>
+        <button data-metric="followers">Followers</button>
+        <button data-metric="posts">Posts</button>
       </div>
     </div>
 
-    {# ---- Platform rollup ---- #}
-    {% if social.platforms %}
-    <div class="card">
-      <h2 class="sc-h2">Platform totals</h2>
-      <div class="sc-plat-row">
-        {% for p in social.platforms %}
-        <div class="sc-plat" data-plat="{{ p.key }}">
-          <div class="sc-plat-name"><span class="sc-dot" data-plat="{{ p.key }}"></span>{{ p.label }}
-            <span class="muted" style="font-weight:400">· {{ p.accounts }} page{{ 's' if p.accounts != 1 }}</span></div>
-          <div class="sc-plat-metrics">
-            <div><b>{{ fmt(p.followers) }}</b><span>followers</span></div>
-            <div><b>{{ fmt(p.reach) }}</b><span>reach</span></div>
-            <div><b>{{ fmt(p.impressions) }}</b><span>impressions</span></div>
-            <div><b>{{ fmt(p.engagement) }}</b><span>engagement</span></div>
-          </div>
+    {% for c in chart_groups %}
+    <div class="sc-clinic">
+      {% if social.multi_clinic %}
+      <div class="sc-clinic-head">{{ c.label }}
+        <span class="muted" style="font-weight:400;font-size:.85rem">· {{ fmt(c.totals.followers) }} followers ·
+          {{ fmt(c.totals.reach) }} reach · {{ c.totals.accounts }} page{{ 's' if c.totals.accounts != 1 }}</span></div>
+      {% endif %}
+      <div class="sc-charts">
+        <div class="card sc-chart-main">
+          <h2 class="sc-h2">Reach / engagement by page</h2>
+          <div class="sc-canvas-wrap"><canvas class="pageChart" data-clinic="{{ c.key }}"></canvas></div>
         </div>
-        {% endfor %}
+        <div class="card sc-chart-side">
+          <h2 class="sc-h2">Followers by platform</h2>
+          <div class="sc-canvas-wrap donut"><canvas class="platformChart" data-clinic="{{ c.key }}"></canvas></div>
+        </div>
       </div>
+      {% if c.platforms %}
+      <div class="card">
+        <h2 class="sc-h2">Platform totals{% if social.multi_clinic %} — {{ c.label }}{% endif %}</h2>
+        <div class="sc-plat-row">
+          {% for p in c.platforms %}
+          <div class="sc-plat">
+            <div class="sc-plat-name"><span class="sc-dot" data-plat="{{ p.key }}"></span>{{ p.label }}
+              <span class="muted" style="font-weight:400">· {{ p.accounts }} page{{ 's' if p.accounts != 1 }}</span></div>
+            <div class="sc-plat-metrics">
+              <div><b>{{ fmt(p.followers) }}</b><span>followers</span></div>
+              <div><b>{{ fmt(p.reach) }}</b><span>reach</span></div>
+              <div><b>{{ fmt(p.impressions) }}</b><span>impressions</span></div>
+              <div><b>{{ fmt(p.engagement) }}</b><span>engagement</span></div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
+    {% endfor %}
     {% endif %}
 
-    {# ---- Per-account detail ---- #}
-    {% for loc in social.locations %}
+    {# ---- Per-account detail (also split by clinic) ---- #}
+    {% for loc in (social.clinics if social.multi_clinic else social.locations) %}
       <div class="loc-head">{{ loc.label }}</div>
       <div class="acct-grid">
         {% for a in loc.accounts %}
@@ -192,64 +203,77 @@
     <script>
     (function(){
       if(typeof Chart === "undefined") return;
-      var accounts = {{ social.accounts_flat|tojson }};
-      var platforms = {{ social.platforms|tojson }};
+      var MULTI = {{ 'true' if social.multi_clinic else 'false' }};
+      var CLINICS = {{ social.clinics|tojson }};
+      var ALL = { accounts_flat: {{ social.accounts_flat|tojson }}, platforms: {{ social.platforms|tojson }} };
+      var groups = MULTI
+        ? CLINICS.map(function(c){ return { key:c.key, accounts:c.accounts_flat, platforms:c.platforms }; })
+        : [{ key:"all", accounts: ALL.accounts_flat, platforms: ALL.platforms }];
+
       var PCOLOR = { facebook:"#1877F2", instagram:"#E1306C", google:"#34A853",
         linkedin:"#0A66C2", youtube:"#FF0000", tiktok:"#111111", pinterest:"#E60023",
         twitter:"#1DA1F2", threads:"#111111" };
       function col(k){ return PCOLOR[k] || "#7D8B6E"; }
-      var olive = "#5E6B51", ink = "#2A2B27", grid = "rgba(0,0,0,.06)";
+      var grid = "rgba(0,0,0,.06)";
       Chart.defaults.font.family = "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif";
       Chart.defaults.color = "#5b5f56";
 
-      // colour the platform-rollup dots to match the charts
       document.querySelectorAll(".sc-dot[data-plat]").forEach(function(d){ d.style.background = col(d.dataset.plat); });
 
-      // ---- By-page bar chart with metric toggle ----
-      var labels = accounts.map(function(a){ return a.name + (a.platform ? " · " + a.platform : ""); });
       var metric = "reach";
-      function dataFor(m){ return accounts.map(function(a){ return a[m] || 0; }); }
-      function colorsFor(){ return accounts.map(function(a){ return col(a.platform_key); }); }
-      var pageCtx = document.getElementById("pageChart").getContext("2d");
-      var pageChart = new Chart(pageCtx, {
-        type: "bar",
-        data: { labels: labels, datasets: [{ label: "Reach", data: dataFor(metric),
-          backgroundColor: colorsFor(), borderRadius: 6, maxBarThickness: 46 }] },
-        options: {
-          indexAxis: "y", responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { display: false },
-            tooltip: { callbacks: { label: function(c){ return " " + c.parsed.x.toLocaleString(); } } } },
-          scales: { x: { beginAtZero: true, grid: { color: grid },
-              ticks: { callback: function(v){ return Number(v).toLocaleString(); } } },
-            y: { grid: { display: false } } }
+      var barCharts = [];  // {chart, accounts}
+
+      groups.forEach(function(g){
+        // By-page bar chart for this clinic
+        var canvas = document.querySelector('.pageChart[data-clinic="' + g.key + '"]');
+        if(canvas){
+          var accounts = g.accounts || [];
+          var labels = accounts.map(function(a){ return a.name + (a.platform ? " · " + a.platform : ""); });
+          var chart = new Chart(canvas.getContext("2d"), {
+            type: "bar",
+            data: { labels: labels, datasets: [{ label: "Reach",
+              data: accounts.map(function(a){ return a[metric] || 0; }),
+              backgroundColor: accounts.map(function(a){ return col(a.platform_key); }),
+              borderRadius: 6, maxBarThickness: 46 }] },
+            options: { indexAxis: "y", responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false },
+                tooltip: { callbacks: { label: function(c){ return " " + c.parsed.x.toLocaleString(); } } } },
+              scales: { x: { beginAtZero: true, grid: { color: grid },
+                  ticks: { callback: function(v){ return Number(v).toLocaleString(); } } },
+                y: { grid: { display: false } } } }
+          });
+          barCharts.push({ chart: chart, accounts: accounts });
+        }
+        // Followers-by-platform doughnut for this clinic
+        var dcanvas = document.querySelector('.platformChart[data-clinic="' + g.key + '"]');
+        if(dcanvas && g.platforms && g.platforms.length){
+          new Chart(dcanvas.getContext("2d"), {
+            type: "doughnut",
+            data: { labels: g.platforms.map(function(p){ return p.label; }),
+              datasets: [{ data: g.platforms.map(function(p){ return p.followers || 0; }),
+                backgroundColor: g.platforms.map(function(p){ return col(p.key); }),
+                borderColor: "#fff", borderWidth: 2 }] },
+            options: { responsive: true, maintainAspectRatio: false, cutout: "62%",
+              plugins: { legend: { position: "bottom", labels: { boxWidth: 12, padding: 12 } },
+                tooltip: { callbacks: { label: function(c){
+                  return " " + c.label + ": " + Number(c.parsed).toLocaleString() + " followers"; } } } } }
+          });
         }
       });
+
+      // One metric toggle controls every clinic's bar chart.
       document.querySelectorAll("#metricToggle button").forEach(function(btn){
         btn.addEventListener("click", function(){
           document.querySelectorAll("#metricToggle button").forEach(function(b){ b.classList.remove("on"); });
           btn.classList.add("on");
           metric = btn.dataset.metric;
-          pageChart.data.datasets[0].data = dataFor(metric);
-          pageChart.data.datasets[0].label = btn.textContent;
-          pageChart.update();
+          barCharts.forEach(function(bc){
+            bc.chart.data.datasets[0].data = bc.accounts.map(function(a){ return a[metric] || 0; });
+            bc.chart.data.datasets[0].label = btn.textContent;
+            bc.chart.update();
+          });
         });
       });
-
-      // ---- Followers-by-platform doughnut ----
-      if(platforms && platforms.length){
-        var pCtx = document.getElementById("platformChart").getContext("2d");
-        new Chart(pCtx, {
-          type: "doughnut",
-          data: { labels: platforms.map(function(p){ return p.label; }),
-            datasets: [{ data: platforms.map(function(p){ return p.followers || 0; }),
-              backgroundColor: platforms.map(function(p){ return col(p.key); }),
-              borderColor: "#fff", borderWidth: 2 }] },
-          options: { responsive: true, maintainAspectRatio: false, cutout: "62%",
-            plugins: { legend: { position: "bottom", labels: { boxWidth: 12, padding: 12 } },
-              tooltip: { callbacks: { label: function(c){
-                return " " + c.label + ": " + Number(c.parsed).toLocaleString() + " followers"; } } } } }
-        });
-      }
     })();
     </script>
     {% endif %}
@@ -258,6 +282,11 @@
   <style>
     .trend.up{ color:#4e7a3a; } .trend.down{ color:#b0472f; } .trend.flat{ color:var(--muted); }
     .stat-tile .win .trend{ font-size:.74rem; font-weight:600; }
+    .sc-metric-bar{ display:flex; align-items:center; gap:.7rem; flex-wrap:wrap; margin:.2rem 0 1rem; }
+    .sc-metric-label{ font-size:.82rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+    .sc-clinic{ margin-bottom:.4rem; }
+    .sc-clinic-head{ font-size:1.12rem; font-weight:700; color:#2A2B27; margin:.4rem 0 .7rem;
+      padding-bottom:.4rem; border-bottom:2px solid #e4ead9; }
     .sc-charts{ display:grid; grid-template-columns:1.7fr 1fr; gap:1.1rem; margin-bottom:1.1rem; }
     .sc-h2{ font-size:1.02rem; margin:0 0 .6rem; color:#5E6B51; }
     .sc-chart-head{ display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; margin-bottom:.3rem; }
