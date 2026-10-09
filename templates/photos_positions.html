@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Photo Positions · Valley Medical{% endblock %}
+{% block nav %}photos{% endblock %}
+{% block content %}
+  <div class="page-head" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+    <h1 style="margin:0"><a href="/photos" class="muted" style="text-decoration:none">Progress Photos</a> › Positions</h1>
+  </div>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  <div class="card">
+    <p class="muted" style="margin:.1rem 0 .2rem">These are the poses the team picks from when taking photos. The order here
+      is the order they appear in the dropdown. Upload a <strong>pose guide</strong> image (e.g. your A/B/C/D drawings) and
+      it shows as the alignment overlay on the camera.</p>
+  </div>
+
+  {% for p in positions %}
+  <div class="card">
+    <form method="post" action="/photos/positions/save" enctype="multipart/form-data" class="pos-form">
+      <input type="hidden" name="position_id" value="{{ p.id }}">
+      <div class="pos-row">
+        <div class="pos-guide">
+          {% set gurl = p.guide_image if (p.guide_image and p.guide_image.startswith('/static')) else ('/photos/guide/' ~ p.id if p.guide_image and p.guide_image.startswith('stored:') else '') %}
+          {% if gurl %}<img src="{{ gurl }}" alt="guide">{% else %}<div class="pos-noguide">No guide</div>{% endif %}
+        </div>
+        <div class="pos-fields">
+          <label class="field"><span>Name</span><input type="text" name="name" value="{{ p.name }}" required></label>
+          <div class="pos-mini">
+            <label class="field"><span>Body area</span>
+              <select name="body_area">
+                <option value="leg" {{ 'selected' if p.body_area=='leg' }}>Leg</option>
+                <option value="arm" {{ 'selected' if p.body_area=='arm' }}>Arm</option>
+                <option value="other" {{ 'selected' if p.body_area=='other' }}>Other</option>
+              </select></label>
+            <label class="field"><span>Frame ratio</span>
+              <select name="aspect">
+                {% set ar = p.aspect_w ~ ':' ~ p.aspect_h %}
+                <option value="3:4" {{ 'selected' if ar=='3:4' }}>3:4 (portrait)</option>
+                <option value="2:3" {{ 'selected' if ar=='2:3' }}>2:3 (taller)</option>
+                <option value="1:1" {{ 'selected' if ar=='1:1' }}>1:1 (square)</option>
+                <option value="4:3" {{ 'selected' if ar=='4:3' }}>4:3 (landscape)</option>
+              </select></label>
+            <label class="field"><span>Order</span><input type="number" name="sort_order" value="{{ p.sort_order }}" style="width:5rem"></label>
+            <label class="field cap-active"><span>Active</span>
+              <input type="checkbox" name="active" {{ 'checked' if p.active }}></label>
+          </div>
+          <label class="field"><span>Replace pose guide (optional)</span>
+            <input type="file" name="guide" accept="image/png,image/jpeg"></label>
+        </div>
+      </div>
+      <div class="pos-actions">
+        <button class="btn" type="submit">Save</button>
+        <button class="btn ghost danger" formaction="/photos/positions/{{ p.id }}/delete"
+                formnovalidate onclick="return confirm('Remove this position? Existing photos keep their saved label.')">Delete</button>
+      </div>
+    </form>
+  </div>
+  {% endfor %}
+
+  <div class="card">
+    <h2 style="font-size:1.05rem;margin:0 0 .5rem;color:#5E6B51">Add a position</h2>
+    <form method="post" action="/photos/positions/save" enctype="multipart/form-data" class="pos-form">
+      <input type="hidden" name="position_id" value="0">
+      <div class="pos-fields">
+        <label class="field"><span>Name</span><input type="text" name="name" placeholder="e.g. Left Ankle — Front" required></label>
+        <div class="pos-mini">
+          <label class="field"><span>Body area</span>
+            <select name="body_area"><option value="leg">Leg</option><option value="arm">Arm</option><option value="other">Other</option></select></label>
+          <label class="field"><span>Frame ratio</span>
+            <select name="aspect"><option value="3:4">3:4 (portrait)</option><option value="2:3">2:3 (taller)</option><option value="1:1">1:1 (square)</option><option value="4:3">4:3 (landscape)</option></select></label>
+          <label class="field"><span>Order</span><input type="number" name="sort_order" value="50" style="width:5rem"></label>
+        </div>
+        <label class="field"><span>Pose guide image (optional)</span>
+          <input type="file" name="guide" accept="image/png,image/jpeg"></label>
+      </div>
+      <div class="pos-actions"><button class="btn" type="submit">Add position</button></div>
+    </form>
+  </div>
+
+  <style>
+    .pos-row{ display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap; }
+    .pos-guide{ flex:0 0 auto; width:96px; }
+    .pos-guide img{ width:96px; height:128px; object-fit:contain; border:1px solid var(--line); border-radius:8px; background:#faf9f6; }
+    .pos-noguide{ width:96px; height:128px; border:1px dashed var(--line); border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:.75rem; }
+    .pos-fields{ flex:1; min-width:240px; }
+    .pos-mini{ display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; }
+    .pos-form .field{ display:flex; flex-direction:column; gap:.25rem; margin-top:.5rem; }
+    .pos-form .field > span{ font-size:.8rem; font-weight:600; color:var(--muted); }
+    .pos-form input[type=text], .pos-form input[type=number], .pos-form select, .pos-form input[type=file]{
+      padding:.5rem .6rem; border:1px solid var(--line); border-radius:8px; background:#fff; color:inherit; font-size:.92rem; }
+    .cap-active{ align-items:flex-start; }
+    .pos-actions{ margin-top:.7rem; display:flex; gap:.5rem; }
+    .btn.danger{ color:#8a2c20; }
+  </style>
+{% endblock %}

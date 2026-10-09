@@ -36,6 +36,12 @@
     {% if can(user.role, 'view_clients') %}
     <a class="nav-link {{ 'active' if nav_current == 'clients' }}" href="/clients">Clients</a>
     {% endif %}
+    {% if can(user.role, 'manage_patients') %}
+    <a class="nav-link {{ 'active' if nav_current == 'patients' }}" href="/patients">Patients</a>
+    {% endif %}
+    {% if can(user.role, 'manage_photos') %}
+    <a class="nav-link {{ 'active' if nav_current == 'photos' }}" href="/photos">Progress Photos</a>
+    {% endif %}
     {% if can(user.role, 'view_meetings') %}
     <a class="nav-link {{ 'active' if nav_current == 'meetings' }}" href="/meetings">
       Meetings{% if meetings_pending %}<span class="badge">{{ meetings_pending }}</span>{% endif %}</a>

@@ -204,6 +204,56 @@ def init_db() -> None:
                 answers       TEXT NOT NULL,   -- JSON: {question_key: value}
                 source        TEXT             -- how they arrived: 'qr'|'email'|'link'
             );
+
+            -- Local patient directory (lives only on the Mac). Clinical data
+            -- (progress photos, etc.) attaches to these records, not to GHL.
+            CREATE TABLE IF NOT EXISTS patients (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL,
+                first_name      TEXT NOT NULL DEFAULT '',
+                last_name       TEXT NOT NULL DEFAULT '',
+                email           TEXT,
+                phone           TEXT,
+                dob             TEXT,            -- optional, 'YYYY-MM-DD'
+                notes           TEXT,
+                ghl_contact_id  TEXT,            -- optional link to the GHL contact
+                active          INTEGER NOT NULL DEFAULT 1,
+                created_by      TEXT
+            );
+
+            -- The photo positions/poses the team can choose from (managed in
+            -- the backend). Seeded with a sensible default set on first run.
+            CREATE TABLE IF NOT EXISTS photo_positions (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at    TEXT NOT NULL,
+                name          TEXT NOT NULL,
+                slug          TEXT NOT NULL,
+                body_area     TEXT,             -- 'leg'|'arm'|'other'
+                aspect_w      INTEGER NOT NULL DEFAULT 3,
+                aspect_h      INTEGER NOT NULL DEFAULT 4,
+                guide_image   TEXT,             -- optional pose-guide image (path/url)
+                sort_order    INTEGER NOT NULL DEFAULT 0,
+                active        INTEGER NOT NULL DEFAULT 1
+            );
+
+            -- Patient progress photos. Files live on disk under PHOTOS_PATH;
+            -- this table records metadata + the local paths.
+            CREATE TABLE IF NOT EXISTS patient_photos (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at     TEXT NOT NULL,
+                patient_id     INTEGER NOT NULL,
+                position_id    INTEGER,
+                position_name  TEXT,
+                orig_path      TEXT,            -- original as captured (EXIF-rotated)
+                std_path       TEXT,            -- standardized crop to the position ratio
+                thumb_path     TEXT,            -- small thumbnail
+                width          INTEGER,
+                height         INTEGER,
+                framing_score  INTEGER,         -- 0-100 similarity to the previous same-position shot
+                framing_note   TEXT,
+                taken_by       TEXT
+            );
             """
         )
         # Lightweight migrations: add columns that newer versions expect, so an
@@ -224,6 +274,23 @@ def init_db() -> None:
         appt_cols = {row["name"] for row in conn.execute("PRAGMA table_info(appointments)")}
         if appt_cols and "ghl_appointment_id" not in appt_cols:
             conn.execute("ALTER TABLE appointments ADD COLUMN ghl_appointment_id TEXT")
+
+        # Seed the default photo positions once (if the table is empty). Order
+        # matches the clinic's reference poses: A=front, B/C=side, D=back.
+        have = conn.execute("SELECT COUNT(*) FROM photo_positions").fetchone()[0]
+        if not have:
+            now = datetime.now().isoformat(timespec="seconds")
+            defaults = [
+                ("Legs — Front", "legs-front", "leg", 3, 4, "/static/photo-guides/pose-front.svg", 10),
+                ("Left Leg — Side", "left-leg-side", "leg", 3, 4, "/static/photo-guides/pose-left.svg", 20),
+                ("Right Leg — Side", "right-leg-side", "leg", 3, 4, "/static/photo-guides/pose-right.svg", 30),
+                ("Legs — Back", "legs-back", "leg", 3, 4, "/static/photo-guides/pose-back.svg", 40),
+            ]
+            conn.executemany(
+                "INSERT INTO photo_positions (created_at, name, slug, body_area, aspect_w, "
+                "aspect_h, guide_image, sort_order, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                [(now, *d) for d in defaults],
+            )
 
 
 # --- Users -------------------------------------------------------------------
@@ -551,6 +618,186 @@ def count_survey_responses(survey_key: str = "patient_satisfaction") -> int:
         return conn.execute(
             "SELECT COUNT(*) FROM survey_responses WHERE survey_key = ?", (survey_key,)
         ).fetchone()[0]
+
+
+# --- Local patient directory -------------------------------------------------
+_PATIENT_FIELDS = {"first_name", "last_name", "email", "phone", "dob", "notes",
+                   "ghl_contact_id", "active"}
+
+
+def create_patient(first_name: str = "", last_name: str = "", email: str = "",
+                   phone: str = "", dob: str = "", notes: str = "",
+                   ghl_contact_id: str = "", created_by: str = "") -> int:
+    now = datetime.now().isoformat(timespec="seconds")
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO patients (created_at, updated_at, first_name, last_name, email, "
+            "phone, dob, notes, ghl_contact_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (now, now, first_name.strip(), last_name.strip(), (email or "").strip(),
+             (phone or "").strip(), (dob or "").strip(), (notes or "").strip(),
+             (ghl_contact_id or "").strip() or None, created_by),
+        )
+        return int(cur.lastrowid)
+
+
+def get_patient(patient_id: int) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM patients WHERE id = ?", (patient_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def get_patient_by_ghl(ghl_contact_id: str) -> Optional[dict]:
+    if not ghl_contact_id:
+        return None
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM patients WHERE ghl_contact_id = ?",
+                           (ghl_contact_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def update_patient(patient_id: int, **fields) -> None:
+    sets = {k: (v.strip() if isinstance(v, str) else v)
+            for k, v in fields.items() if k in _PATIENT_FIELDS}
+    if not sets:
+        return
+    sets["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    cols = ", ".join(f"{k} = ?" for k in sets)
+    with _connect() as conn:
+        conn.execute(f"UPDATE patients SET {cols} WHERE id = ?", (*sets.values(), patient_id))
+
+
+def search_patients(q: str, limit: int = 20, include_inactive: bool = False) -> list[dict]:
+    """Search local patients by name / email / phone."""
+    q = (q or "").strip()
+    if not q:
+        return []
+    like = f"%{q}%"
+    where = ("(first_name LIKE ? OR last_name LIKE ? OR (first_name || ' ' || last_name) LIKE ? "
+             "OR email LIKE ? OR phone LIKE ?)")
+    params: tuple = (like, like, like, like, like)
+    if not include_inactive:
+        where += " AND active = 1"
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM patients WHERE {where} ORDER BY last_name, first_name LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_patients(limit: int = 500, include_inactive: bool = False) -> list[dict]:
+    where = "" if include_inactive else "WHERE active = 1"
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM patients {where} ORDER BY last_name, first_name LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def count_patients(include_inactive: bool = False) -> int:
+    where = "" if include_inactive else "WHERE active = 1"
+    with _connect() as conn:
+        return conn.execute(f"SELECT COUNT(*) FROM patients {where}").fetchone()[0]
+
+
+# --- Photo positions (managed in the backend) --------------------------------
+_POSITION_FIELDS = {"name", "slug", "body_area", "aspect_w", "aspect_h",
+                    "guide_image", "sort_order", "active"}
+
+
+def list_photo_positions(active_only: bool = True) -> list[dict]:
+    where = "WHERE active = 1" if active_only else ""
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM photo_positions {where} ORDER BY sort_order, id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_photo_position(position_id: int) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM photo_positions WHERE id = ?", (position_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def create_photo_position(name: str, slug: str, body_area: str = "leg",
+                          aspect_w: int = 3, aspect_h: int = 4,
+                          guide_image: str = "", sort_order: int = 0) -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO photo_positions (created_at, name, slug, body_area, aspect_w, "
+            "aspect_h, guide_image, sort_order, active) VALUES (?,?,?,?,?,?,?,?,1)",
+            (datetime.now().isoformat(timespec="seconds"), name, slug, body_area,
+             aspect_w, aspect_h, guide_image or None, sort_order),
+        )
+        return int(cur.lastrowid)
+
+
+def update_photo_position(position_id: int, **fields) -> None:
+    sets = {k: v for k, v in fields.items() if k in _POSITION_FIELDS}
+    if not sets:
+        return
+    cols = ", ".join(f"{k} = ?" for k in sets)
+    with _connect() as conn:
+        conn.execute(f"UPDATE photo_positions SET {cols} WHERE id = ?",
+                     (*sets.values(), position_id))
+
+
+def delete_photo_position(position_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM photo_positions WHERE id = ?", (position_id,))
+
+
+# --- Patient progress photos -------------------------------------------------
+def add_patient_photo(patient_id: int, position_id: Optional[int], position_name: str,
+                      orig_path: str, std_path: str, thumb_path: str,
+                      width: int, height: int, framing_score: Optional[int],
+                      framing_note: str, taken_by: str) -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO patient_photos (created_at, patient_id, position_id, position_name, "
+            "orig_path, std_path, thumb_path, width, height, framing_score, framing_note, taken_by) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (datetime.now().isoformat(timespec="seconds"), patient_id, position_id, position_name,
+             orig_path, std_path, thumb_path, width, height, framing_score, framing_note, taken_by),
+        )
+        return int(cur.lastrowid)
+
+
+def get_patient_photo(photo_id: int) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM patient_photos WHERE id = ?", (photo_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_patient_photos(patient_id: int, position_id: Optional[int] = None) -> list[dict]:
+    query = "SELECT * FROM patient_photos WHERE patient_id = ?"
+    params: tuple = (patient_id,)
+    if position_id is not None:
+        query += " AND position_id = ?"
+        params = (patient_id, position_id)
+    query += " ORDER BY id DESC"
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def latest_patient_photo(patient_id: int, position_id: int) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM patient_photos WHERE patient_id = ? AND position_id = ? "
+            "ORDER BY id DESC LIMIT 1", (patient_id, position_id)).fetchone()
+        return dict(row) if row else None
+
+
+def delete_patient_photo(photo_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM patient_photos WHERE id = ?", (photo_id,))
+
+
+def count_patient_photos(patient_id: int) -> int:
+    with _connect() as conn:
+        return conn.execute("SELECT COUNT(*) FROM patient_photos WHERE patient_id = ?",
+                           (patient_id,)).fetchone()[0]
 
 
 # --- Settings (small key/value store, e.g. reminder workflow mapping) --------

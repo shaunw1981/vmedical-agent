@@ -42,6 +42,7 @@ import inbox as inbox_svc
 import mailer
 import meetings as meetings_svc
 import obsidian
+import photos as photos_svc
 import reminders
 import survey as survey_svc
 import wordpress
@@ -49,7 +50,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.22.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.23.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -2041,3 +2042,330 @@ def surveys_export_csv(request: Request):
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="patient-surveys.csv"'},
     )
+
+
+# =============================================================================
+# Local patient directory + patient progress photos
+#
+# Everything here stays ON THE MAC. Patient records live in the local database;
+# photo files live under PHOTOS_PATH. Nothing is uploaded to any outside service.
+# =============================================================================
+
+def _photo_file_response(rel_path: str, download_name: Optional[str] = None):
+    """Serve a stored image file from the local photo store (private)."""
+    try:
+        path = photos_svc.abs_path(rel_path)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "bad path"}, status_code=400)
+    if not path.exists():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    headers = {"Cache-Control": "private, max-age=3600"}
+    if download_name:
+        headers["Content-Disposition"] = f'attachment; filename="{download_name}"'
+    return FileResponse(str(path), media_type="image/jpeg", headers=headers)
+
+
+def _patient_label(p: dict) -> str:
+    name = f"{p.get('first_name','') or ''} {p.get('last_name','') or ''}".strip()
+    return name or (p.get("email") or p.get("phone") or f"Patient #{p['id']}")
+
+
+# --- Patient directory -------------------------------------------------------
+@app.get("/patients", response_class=HTMLResponse)
+def patients_list(request: Request, q: str = ""):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    results = db.search_patients(q) if q.strip() else db.list_patients(limit=500)
+    return templates.TemplateResponse(
+        "patients_list.html",
+        _ctx(request, user, patients=results, q=q, total=db.count_patients(),
+             ghl_enabled=config.ghl_contacts_enabled(),
+             flash=request.session.pop("patients_flash", None)),
+    )
+
+
+@app.get("/api/patients/search")
+def api_patients_search(request: Request, q: str = ""):
+    if not auth.current_user(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if len((q or "").strip()) < 2:
+        return {"patients": []}
+    rows = db.search_patients(q, limit=15)
+    return {"patients": [{"id": r["id"], "label": _patient_label(r),
+                          "email": r.get("email") or "", "phone": r.get("phone") or ""}
+                         for r in rows]}
+
+
+@app.post("/patients/new")
+def patients_new(request: Request, first_name: str = Form(""), last_name: str = Form(""),
+                 email: str = Form(""), phone: str = Form(""), dob: str = Form(""),
+                 notes: str = Form("")):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    if not (first_name.strip() or last_name.strip()):
+        request.session["patients_flash"] = {"ok": False, "msg": "Enter at least a first or last name."}
+        return RedirectResponse("/patients", status_code=303)
+    pid = db.create_patient(first_name, last_name, email, phone, dob, notes, created_by=user["email"])
+    return RedirectResponse(f"/patients/{pid}", status_code=303)
+
+
+@app.get("/patients/{patient_id}", response_class=HTMLResponse)
+def patient_detail(request: Request, patient_id: int):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    patient = db.get_patient(patient_id)
+    if not patient:
+        return templates.TemplateResponse("403.html", _ctx(request, user), status_code=404)
+    photos_rows = db.list_patient_photos(patient_id)
+    # Group by position, newest first within each.
+    by_pos: dict = {}
+    for ph in photos_rows:
+        by_pos.setdefault(ph.get("position_name") or "Other", []).append(ph)
+    return templates.TemplateResponse(
+        "patient_detail.html",
+        _ctx(request, user, patient=patient, label=_patient_label(patient),
+             photos_by_position=by_pos, photo_count=len(photos_rows),
+             can_photos=config.can(user["role"], "manage_photos"),
+             flash=request.session.pop("patients_flash", None)),
+    )
+
+
+@app.post("/patients/{patient_id}/edit")
+def patient_edit(request: Request, patient_id: int, first_name: str = Form(""),
+                 last_name: str = Form(""), email: str = Form(""), phone: str = Form(""),
+                 dob: str = Form(""), notes: str = Form(""), ghl_contact_id: str = Form("")):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    db.update_patient(patient_id, first_name=first_name, last_name=last_name, email=email,
+                      phone=phone, dob=dob, notes=notes, ghl_contact_id=ghl_contact_id)
+    request.session["patients_flash"] = {"ok": True, "msg": "Patient details updated."}
+    return RedirectResponse(f"/patients/{patient_id}", status_code=303)
+
+
+@app.post("/patients/import-ghl")
+def patients_import_ghl(request: Request):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    if not config.ghl_contacts_enabled():
+        request.session["patients_flash"] = {"ok": False, "msg": "GoHighLevel isn't connected, so there's nothing to import."}
+        return RedirectResponse("/patients", status_code=303)
+    try:
+        contacts = ghl.list_all_contacts(config.reminder_location_id())
+    except Exception as exc:  # noqa: BLE001
+        request.session["patients_flash"] = {"ok": False, "msg": f"Couldn't reach GoHighLevel: {exc}"}
+        return RedirectResponse("/patients", status_code=303)
+    added, updated = 0, 0
+    for c in contacts:
+        first = c.get("first_name") or ""
+        last = c.get("last_name") or ""
+        if not (first or last) and c.get("name"):
+            parts = c["name"].split(" ", 1)
+            first = parts[0]
+            last = parts[1] if len(parts) > 1 else ""
+        existing = db.get_patient_by_ghl(c["id"])
+        if existing:
+            db.update_patient(existing["id"], first_name=first or existing["first_name"],
+                              last_name=last or existing["last_name"],
+                              email=c.get("email") or existing.get("email") or "",
+                              phone=c.get("phone") or existing.get("phone") or "")
+            updated += 1
+        else:
+            db.create_patient(first, last, c.get("email") or "", c.get("phone") or "",
+                              ghl_contact_id=c["id"], created_by=f"ghl-import:{user['email']}")
+            added += 1
+    request.session["patients_flash"] = {
+        "ok": True,
+        "msg": f"Imported from GoHighLevel: {added} new, {updated} updated ({len(contacts)} contacts seen)."}
+    return RedirectResponse("/patients", status_code=303)
+
+
+# --- Progress photos: capture + serve ----------------------------------------
+@app.get("/photos", response_class=HTMLResponse)
+def photos_capture(request: Request, patient_id: int = 0):
+    user, resp = _guard(request, "manage_photos")
+    if resp:
+        return resp
+    preset = db.get_patient(patient_id) if patient_id else None
+    return templates.TemplateResponse(
+        "photos_capture.html",
+        _ctx(request, user, positions=db.list_photo_positions(active_only=True),
+             preset_patient=({"id": preset["id"], "label": _patient_label(preset)} if preset else None)),
+    )
+
+
+@app.post("/photos/upload")
+async def photos_upload(request: Request, patient_id: int = Form(...),
+                        position_id: int = Form(...), image: UploadFile = File(...)):
+    user, resp = _guard(request, "manage_photos")
+    if resp:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    patient = db.get_patient(patient_id)
+    position = db.get_photo_position(position_id)
+    if not patient or not position:
+        return JSONResponse({"error": "Unknown patient or position."}, status_code=400)
+    data = await image.read()
+    if not data:
+        return JSONResponse({"error": "No image received."}, status_code=400)
+    prev = db.latest_patient_photo(patient_id, position_id)
+    try:
+        meta = photos_svc.store(patient, position, data, taken_by=user["email"],
+                                prev_std_rel=(prev["std_path"] if prev else None))
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": f"Couldn't process the image: {exc}"}, status_code=500)
+    photo_id = db.add_patient_photo(
+        patient_id, position_id, position["name"], meta["orig_path"], meta["std_path"],
+        meta["thumb_path"], meta["width"], meta["height"], meta["framing_score"],
+        meta["framing_note"], user["email"])
+    return {
+        "ok": True, "photo_id": photo_id,
+        "framing_score": meta["framing_score"], "framing_note": meta["framing_note"],
+        "thumb_url": f"/photos/thumb/{photo_id}", "std_url": f"/photos/file/{photo_id}",
+        "position": position["name"],
+    }
+
+
+@app.get("/api/photos/latest")
+def api_photos_latest(request: Request, patient_id: int, position_id: int):
+    if not auth.current_user(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    ph = db.latest_patient_photo(patient_id, position_id)
+    if not ph:
+        return {"photo": None}
+    return {"photo": {"id": ph["id"], "std_url": f"/photos/file/{ph['id']}",
+                      "thumb_url": f"/photos/thumb/{ph['id']}", "created_at": ph["created_at"]}}
+
+
+@app.get("/photos/file/{photo_id}")
+def photos_file(request: Request, photo_id: int):
+    user, resp = _guard(request, "manage_photos")
+    if resp:
+        return resp
+    ph = db.get_patient_photo(photo_id)
+    if not ph:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return _photo_file_response(ph["std_path"])
+
+
+@app.get("/photos/thumb/{photo_id}")
+def photos_thumb(request: Request, photo_id: int):
+    user, resp = _guard(request, "manage_photos")
+    if resp:
+        return resp
+    ph = db.get_patient_photo(photo_id)
+    if not ph:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return _photo_file_response(ph["thumb_path"] or ph["std_path"])
+
+
+@app.get("/photos/orig/{photo_id}")
+def photos_orig(request: Request, photo_id: int):
+    user, resp = _guard(request, "manage_photos")
+    if resp:
+        return resp
+    ph = db.get_patient_photo(photo_id)
+    if not ph:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return _photo_file_response(ph["orig_path"] or ph["std_path"], download_name=f"photo-{photo_id}.jpg")
+
+
+@app.post("/photos/{photo_id}/delete")
+def photos_delete(request: Request, photo_id: int):
+    user, resp = _guard(request, "manage_photos")
+    if resp:
+        return resp
+    ph = db.get_patient_photo(photo_id)
+    if ph:
+        photos_svc.delete_files(ph.get("std_path"), ph.get("thumb_path"), ph.get("orig_path"))
+        db.delete_patient_photo(photo_id)
+        request.session["patients_flash"] = {"ok": True, "msg": "Photo deleted."}
+    back = request.query_params.get("back") or (f"/patients/{ph['patient_id']}" if ph else "/patients")
+    return RedirectResponse(back, status_code=303)
+
+
+# --- Photo positions (managed in the backend) --------------------------------
+def _position_guide_rel(position_id: int, ext: str) -> str:
+    return f"_guides/pos-{position_id}{ext}"
+
+
+@app.get("/photos/guide/{position_id}")
+def photos_guide(request: Request, position_id: int):
+    """Serve an uploaded pose-guide image (stored under the photo root)."""
+    if not auth.current_user(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    pos = db.get_photo_position(position_id)
+    if not pos or not (pos.get("guide_image") or "").startswith("stored:"):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    rel = pos["guide_image"].split("stored:", 1)[1]
+    try:
+        path = photos_svc.abs_path(rel)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "bad path"}, status_code=400)
+    if not path.exists():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    mt = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    return FileResponse(str(path), media_type=mt, headers={"Cache-Control": "private, max-age=600"})
+
+
+@app.get("/photos/positions", response_class=HTMLResponse)
+def photos_positions(request: Request):
+    user, resp = _guard(request, "manage_photos")
+    if resp:
+        return resp
+    return templates.TemplateResponse(
+        "photos_positions.html",
+        _ctx(request, user, positions=db.list_photo_positions(active_only=False),
+             flash=request.session.pop("positions_flash", None)),
+    )
+
+
+@app.post("/photos/positions/save")
+async def photos_positions_save(request: Request, position_id: int = Form(0),
+                                name: str = Form(...), body_area: str = Form("leg"),
+                                aspect: str = Form("3:4"), sort_order: int = Form(0),
+                                active: str = Form("on"), guide: UploadFile = File(None)):
+    user, resp = _guard(request, "manage_photos")
+    if resp:
+        return resp
+    try:
+        aw, ah = (int(x) for x in aspect.split(":", 1))
+    except Exception:  # noqa: BLE001
+        aw, ah = 3, 4
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-") or "position"
+    is_active = 1 if active in ("on", "1", "true", "yes") else 0
+
+    if position_id:
+        db.update_photo_position(position_id, name=name.strip(), slug=slug, body_area=body_area,
+                                 aspect_w=aw, aspect_h=ah, sort_order=sort_order, active=is_active)
+        pid = position_id
+    else:
+        pid = db.create_photo_position(name.strip(), slug, body_area, aw, ah, "", sort_order)
+
+    # Optional pose-guide image upload → stored under the photo root (NOT static,
+    # so update.command never wipes it).
+    if guide is not None:
+        data = await guide.read()
+        if data:
+            ext = ".png" if (guide.content_type or "").endswith("png") else ".jpg"
+            rel = _position_guide_rel(pid, ext)
+            dest = photos_svc.root() / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+            db.update_photo_position(pid, guide_image=f"stored:{rel}")
+
+    request.session["positions_flash"] = {"ok": True, "msg": "Position saved."}
+    return RedirectResponse("/photos/positions", status_code=303)
+
+
+@app.post("/photos/positions/{position_id}/delete")
+def photos_positions_delete(request: Request, position_id: int):
+    user, resp = _guard(request, "manage_photos")
+    if resp:
+        return resp
+    db.delete_photo_position(position_id)
+    request.session["positions_flash"] = {"ok": True, "msg": "Position removed."}
+    return RedirectResponse("/photos/positions", status_code=303)

@@ -20,6 +20,18 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
 # Secret used to sign login cookies. Set a long random value in .env.
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "change-me-please")
 
+# Where patient progress photos are stored ON THIS MAC. Everything stays local —
+# nothing is ever uploaded off the machine. Defaults to the app's data/photos
+# folder. You can point it at an external/encrypted drive via PHOTOS_PATH in .env.
+PHOTOS_PATH = os.environ.get("PHOTOS_PATH", "").strip()
+
+
+def photos_path() -> str:
+    """Absolute path to the local photo store (created on first use)."""
+    import os.path as _p
+    base = PHOTOS_PATH or _p.join(_p.dirname(_p.abspath(__file__)), "data", "photos")
+    return base
+
 # Allow logins from this Google Workspace domain (e.g. "vmedical.ca"). You can
 # list more than one, separated by commas. Leave blank to allow any Google
 # account (not recommended for production).
@@ -343,6 +355,8 @@ DEFAULT_ROLE = "team_member"
 #   use_content       - draft blog posts with Charlie and push them to WordPress
 #   manage_knowledge  - edit Charlie's knowledge base + personality (Obsidian)
 #   view_surveys      - see the anonymous patient-satisfaction survey results
+#   manage_patients   - add/search/edit the local patient directory + GHL import
+#   manage_photos     - capture/view patient progress photos + manage positions
 ROLE_CAPABILITIES = {
     "super_admin": {
         "view_messages",
@@ -353,6 +367,8 @@ ROLE_CAPABILITIES = {
         "view_reminders",
         "schedule_reminders",
         "view_clients",
+        "manage_patients",
+        "manage_photos",
         "use_charlie",
         "view_meetings",
         "manage_meetings",
@@ -369,6 +385,8 @@ ROLE_CAPABILITIES = {
         "view_reminders",
         "schedule_reminders",
         "view_clients",
+        "manage_patients",
+        "manage_photos",
         "use_charlie",
         "view_meetings",
         "manage_meetings",
@@ -383,6 +401,8 @@ ROLE_CAPABILITIES = {
         "view_reminders",
         "schedule_reminders",
         "view_clients",
+        "manage_patients",
+        "manage_photos",
         "use_charlie",
         "view_meetings",
         "manage_meetings",  # team members confirm which client a consult belongs to

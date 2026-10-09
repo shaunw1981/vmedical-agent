@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% block title %}Progress Photos · Valley Medical{% endblock %}
+{% block nav %}photos{% endblock %}
+{% block content %}
+  <div class="page-head" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+    <h1 style="margin:0">Progress Photos</h1>
+    <div style="display:flex;gap:.5rem">
+      <a class="btn ghost" href="/photos/positions">Manage positions</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <!-- Step 1: patient -->
+    <div class="cap-step">
+      <div class="cap-step-label">1 · Patient</div>
+      <div id="patientPicked" class="cap-chip" hidden>
+        <span id="patientName"></span>
+        <button type="button" onclick="clearPatient()" title="Change">✕</button>
+      </div>
+      <div id="patientPick">
+        <input id="patientSearch" type="text" autocomplete="off" placeholder="Search patient by name, email, or phone…">
+        <div id="patientResults" class="cap-results" hidden></div>
+        <div class="muted" style="font-size:.8rem;margin-top:.3rem">
+          Can't find them? <a href="/patients">Add the patient</a> first.</div>
+      </div>
+    </div>
+
+    <!-- Step 2: position -->
+    <div class="cap-step">
+      <div class="cap-step-label">2 · Position</div>
+      <select id="positionSelect">
+        {% for p in positions %}
+        <option value="{{ p.id }}"
+          data-aw="{{ p.aspect_w }}" data-ah="{{ p.aspect_h }}"
+          data-guide="{% if p.guide_image and p.guide_image.startswith('/static') %}{{ p.guide_image }}{% elif p.guide_image and p.guide_image.startswith('stored:') %}/photos/guide/{{ p.id }}{% endif %}">
+          {{ p.name }}</option>
+        {% endfor %}
+      </select>
+      {% if not positions %}<p class="muted">No positions set up yet — <a href="/photos/positions">add some</a>.</p>{% endif %}
+    </div>
+
+    <!-- Step 3: camera -->
+    <div class="cap-step">
+      <div class="cap-step-label">3 · Line up &amp; capture</div>
+
+      <div id="camStage">
+        <div id="camWrap">
+          <video id="video" playsinline muted></video>
+          <img id="guideOverlay" class="overlay" alt="">
+          <img id="ghostOverlay" class="overlay" alt="">
+          <canvas id="previewCanvas" hidden></canvas>
+        </div>
+
+        <div class="cap-overlay-controls">
+          <label class="cap-ov"><input type="checkbox" id="showGuide" checked> Pose guide</label>
+          <label class="cap-ov"><input type="checkbox" id="showGhost" checked> Last photo (ghost)</label>
+          <label class="cap-slider">Overlay
+            <input type="range" id="overlayOpacity" min="0" max="80" value="45"></label>
+          <button type="button" class="btn ghost cap-flip" id="flipBtn" title="Switch camera">⟳ Flip</button>
+        </div>
+
+        <div class="cap-actions" id="liveActions">
+          <button type="button" class="btn cap-shutter" id="captureBtn" disabled>● Capture</button>
+        </div>
+        <div class="cap-actions" id="reviewActions" hidden>
+          <button type="button" class="btn ghost" id="retakeBtn">Retake</button>
+          <button type="button" class="btn cap-save" id="saveBtn">Save &amp; next</button>
+        </div>
+
+        <div id="statusMsg" class="cap-status"></div>
+      </div>
+
+      <!-- Fallback if the live camera can't be used -->
+      <div id="camFallback" hidden>
+        <p class="muted" style="font-size:.85rem">Live camera isn't available on this device/browser, so the pose-guide
+          overlay is off. You can still capture with the phone's camera:</p>
+        <input id="fileCapture" type="file" accept="image/*" capture="environment">
+      </div>
+    </div>
+  </div>
+
+  <!-- Saved this session -->
+  <div class="card" id="sessionCard" hidden>
+    <h2 style="font-size:1.05rem;margin:0 0 .5rem;color:#5E6B51">Saved this session</h2>
+    <div id="sessionStrip" class="cap-session"></div>
+    <div id="patientLink" style="margin-top:.6rem"></div>
+  </div>
+
+  <style>
+    .cap-step{ padding:.7rem 0; border-top:1px solid var(--line); }
+    .cap-step:first-child{ border-top:0; padding-top:0; }
+    .cap-step-label{ font-size:.78rem; text-transform:uppercase; letter-spacing:.07em; font-weight:700; color:var(--muted); margin-bottom:.45rem; }
+    #patientSearch, #positionSelect{ width:100%; box-sizing:border-box; padding:.6rem .75rem; border:1px solid var(--line); border-radius:8px; font-size:1rem; background:#fff; color:inherit; }
+    .cap-results{ border:1px solid var(--line); border-radius:8px; margin-top:.3rem; overflow:hidden; }
+    .cap-results button{ display:block; width:100%; text-align:left; background:#fff; border:0; border-top:1px solid var(--line); padding:.6rem .7rem; cursor:pointer; font-size:.95rem; }
+    .cap-results button:first-child{ border-top:0; }
+    .cap-results button:hover{ background:#f3f5f0; }
+    .cap-results .r-sub{ color:var(--muted); font-size:.8rem; }
+    .cap-chip{ display:inline-flex; align-items:center; gap:.6rem; background:#e9ecdf; color:#4e5944; border-radius:999px; padding:.4rem .5rem .4rem .9rem; font-weight:600; }
+    .cap-chip button{ background:#fff; border:0; border-radius:50%; width:22px; height:22px; cursor:pointer; color:#4e5944; }
+    #camWrap{ position:relative; width:100%; max-width:380px; margin:0 auto; aspect-ratio:3/4; background:#111; border-radius:14px; overflow:hidden; }
+    #video{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+    #previewCanvas{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#111; }
+    .overlay{ position:absolute; inset:0; width:100%; height:100%; object-fit:contain; pointer-events:none; opacity:.45; }
+    #ghostOverlay{ object-fit:cover; }
+    .cap-overlay-controls{ display:flex; flex-wrap:wrap; gap:.8rem 1.1rem; align-items:center; justify-content:center; margin:.7rem 0 .2rem; }
+    .cap-ov{ font-size:.85rem; display:inline-flex; gap:.35rem; align-items:center; }
+    .cap-slider{ font-size:.8rem; color:var(--muted); display:inline-flex; gap:.4rem; align-items:center; }
+    .cap-slider input{ width:110px; }
+    .cap-actions{ display:flex; gap:.6rem; justify-content:center; margin-top:.5rem; }
+    .cap-shutter{ font-size:1.05rem; padding:.8rem 1.8rem; }
+    .cap-save{ background:#5E6B51; }
+    .cap-status{ text-align:center; margin-top:.6rem; min-height:1.3rem; font-size:.92rem; }
+    .cap-status .good{ color:#4e5944; font-weight:600; }
+    .cap-status .mid{ color:#8a6d1f; font-weight:600; }
+    .cap-status .low{ color:#8a2c20; font-weight:600; }
+    .cap-status .err{ color:#8a2c20; }
+    .cap-session{ display:flex; gap:.6rem; overflow-x:auto; padding-bottom:.3rem; }
+    .cap-session figure{ margin:0; flex:0 0 auto; width:96px; text-align:center; }
+    .cap-session img{ width:96px; height:128px; object-fit:cover; border-radius:8px; border:1px solid var(--line); }
+    .cap-session figcaption{ font-size:.7rem; color:var(--muted); margin-top:.2rem; }
+    #fileCapture{ display:block; margin-top:.4rem; }
+  </style>
+
+  <script>
+  (function(){
+    var preset = {{ preset_patient|tojson }};
+    var state = { patientId: null, patientLabel: null, stream: null, facing: "environment", blob: null };
+
+    var $ = function(id){ return document.getElementById(id); };
+    var search = $("patientSearch"), results = $("patientResults");
+    var picked = $("patientPicked"), pickBox = $("patientPick"), nameSpan = $("patientName");
+    var posSel = $("positionSelect");
+    var video = $("video"), canvas = $("previewCanvas");
+    var guide = $("guideOverlay"), ghost = $("ghostOverlay");
+    var captureBtn = $("captureBtn"), saveBtn = $("saveBtn"), retakeBtn = $("retakeBtn");
+    var liveActions = $("liveActions"), reviewActions = $("reviewActions");
+    var statusMsg = $("statusMsg"), sessionCard = $("sessionCard"), sessionStrip = $("sessionStrip");
+
+    // ---- Patient search ----
+    var t = null;
+    search && search.addEventListener("input", function(){
+      clearTimeout(t); var q = search.value.trim();
+      if(q.length < 2){ results.hidden = true; results.innerHTML = ""; return; }
+      t = setTimeout(function(){
+        fetch("/api/patients/search?q=" + encodeURIComponent(q))
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            results.innerHTML = "";
+            (d.patients || []).forEach(function(p){
+              var b = document.createElement("button");
+              b.type = "button";
+              b.innerHTML = "<strong>" + esc(p.label) + "</strong>" +
+                (p.email || p.phone ? "<div class='r-sub'>" + esc([p.email,p.phone].filter(Boolean).join(" · ")) + "</div>" : "");
+              b.onclick = function(){ choosePatient(p.id, p.label); };
+              results.appendChild(b);
+            });
+            if(!(d.patients||[]).length){ results.innerHTML = "<button type='button' disabled>No matches</button>"; }
+            results.hidden = false;
+          });
+      }, 220);
+    });
+
+    function choosePatient(id, label){
+      state.patientId = id; state.patientLabel = label;
+      nameSpan.textContent = label; picked.hidden = false; pickBox.hidden = true;
+      results.hidden = true;
+      $("patientLink").innerHTML = '<a class="btn ghost" href="/patients/' + id + '">View ' + esc(label) + "'s photos</a>";
+      refreshGhost(); updateCaptureEnabled();
+    }
+    window.clearPatient = function(){
+      state.patientId = null; picked.hidden = true; pickBox.hidden = false;
+      search.value = ""; results.hidden = true; ghost.removeAttribute("src"); updateCaptureEnabled();
+    };
+    if(preset){ choosePatient(preset.id, preset.label); }
+
+    // ---- Position ----
+    posSel && posSel.addEventListener("change", function(){ applyAspect(); refreshGhost(); loadGuide(); });
+
+    function selectedPosition(){
+      var o = posSel.options[posSel.selectedIndex];
+      return o ? { id:o.value, aw:+o.dataset.aw||3, ah:+o.dataset.ah||4, guide:o.dataset.guide||"" } : null;
+    }
+    function applyAspect(){
+      var p = selectedPosition(); if(!p) return;
+      $("camWrap").style.aspectRatio = p.aw + "/" + p.ah;
+    }
+    function loadGuide(){
+      var p = selectedPosition();
+      if(p && p.guide && $("showGuide").checked){ guide.src = p.guide; guide.hidden = false; }
+      else { guide.removeAttribute("src"); }
+    }
+    function refreshGhost(){
+      var p = selectedPosition();
+      if(!state.patientId || !p){ ghost.removeAttribute("src"); return; }
+      fetch("/api/photos/latest?patient_id=" + state.patientId + "&position_id=" + p.id)
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if(d.photo && $("showGhost").checked){ ghost.src = d.photo.std_url; }
+          else { ghost.removeAttribute("src"); }
+        }).catch(function(){ ghost.removeAttribute("src"); });
+    }
+
+    // ---- Overlay controls ----
+    function applyOpacity(){
+      var v = (+$("overlayOpacity").value)/100;
+      guide.style.opacity = v; ghost.style.opacity = v;
+    }
+    $("overlayOpacity").addEventListener("input", applyOpacity);
+    $("showGuide").addEventListener("change", loadGuide);
+    $("showGhost").addEventListener("change", refreshGhost);
+
+    // ---- Camera ----
+    function startCamera(){
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ return fallback(); }
+      stopCamera();
+      navigator.mediaDevices.getUserMedia({ video:{ facingMode: state.facing }, audio:false })
+        .then(function(s){ state.stream = s; video.srcObject = s; video.play(); updateCaptureEnabled(); })
+        .catch(function(){ fallback(); });
+    }
+    function stopCamera(){ if(state.stream){ state.stream.getTracks().forEach(function(tk){ tk.stop(); }); state.stream = null; } }
+    function fallback(){ $("camStage").hidden = true; $("camFallback").hidden = false; }
+    $("flipBtn").addEventListener("click", function(){ state.facing = (state.facing === "environment") ? "user" : "environment"; startCamera(); });
+
+    function updateCaptureEnabled(){ captureBtn.disabled = !(state.patientId && state.stream && selectedPosition()); }
+
+    // ---- Capture (cover-crop the live frame to the position ratio) ----
+    captureBtn.addEventListener("click", function(){
+      var p = selectedPosition(); if(!p || !video.videoWidth) return;
+      var boxAspect = p.aw / p.ah, vW = video.videoWidth, vH = video.videoHeight, vAspect = vW / vH;
+      var sx, sy, sW, sH;
+      if(vAspect > boxAspect){ sH = vH; sW = Math.round(vH * boxAspect); sx = Math.round((vW - sW)/2); sy = 0; }
+      else { sW = vW; sH = Math.round(vW / boxAspect); sx = 0; sy = Math.round((vH - sH)/2); }
+      var scale = Math.min(1, 1600 / Math.max(sW, sH));
+      canvas.width = Math.round(sW * scale); canvas.height = Math.round(sH * scale);
+      canvas.getContext("2d").drawImage(video, sx, sy, sW, sH, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(function(b){
+        state.blob = b; canvas.hidden = false; video.style.visibility = "hidden";
+        liveActions.hidden = true; reviewActions.hidden = false;
+        statusMsg.innerHTML = "Review the shot, then Save.";
+      }, "image/jpeg", 0.9);
+    });
+    retakeBtn.addEventListener("click", function(){
+      state.blob = null; canvas.hidden = true; video.style.visibility = "visible";
+      reviewActions.hidden = true; liveActions.hidden = false; statusMsg.textContent = "";
+    });
+
+    saveBtn.addEventListener("click", function(){ if(state.blob) upload(state.blob); });
+
+    // ---- File-input fallback ----
+    var fc = $("fileCapture");
+    fc && fc.addEventListener("change", function(){ if(fc.files && fc.files[0]) upload(fc.files[0]); });
+
+    function upload(blob){
+      var p = selectedPosition();
+      if(!state.patientId){ statusMsg.innerHTML = "<span class='err'>Pick a patient first.</span>"; return; }
+      if(!p){ statusMsg.innerHTML = "<span class='err'>Pick a position first.</span>"; return; }
+      saveBtn && (saveBtn.disabled = true);
+      statusMsg.textContent = "Saving…";
+      var fd = new FormData();
+      fd.append("patient_id", state.patientId);
+      fd.append("position_id", p.id);
+      fd.append("image", blob, "capture.jpg");
+      fetch("/photos/upload", { method:"POST", body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          saveBtn && (saveBtn.disabled = false);
+          if(!d.ok){ statusMsg.innerHTML = "<span class='err'>" + esc(d.error||"Upload failed") + "</span>"; return; }
+          var cls = d.framing_score == null ? "" : (d.framing_score >= 85 ? "good" : (d.framing_score >= 70 ? "mid" : "low"));
+          statusMsg.innerHTML = "<span class='" + cls + "'>Saved ✓ " +
+            (d.framing_score == null ? "(reference shot)" : "Framing " + d.framing_score + "%") + "</span><br>" +
+            "<span class='muted' style='font-size:.82rem'>" + esc(d.framing_note||"") + "</span>";
+          addToSession(d);
+          // reset for next shot; the just-saved photo becomes the new ghost
+          state.blob = null; canvas.hidden = true; video.style.visibility = "visible";
+          reviewActions.hidden = true; liveActions.hidden = false;
+          if(fc) fc.value = "";
+          refreshGhost();
+        })
+        .catch(function(){ saveBtn && (saveBtn.disabled=false); statusMsg.innerHTML = "<span class='err'>Network error — try again.</span>"; });
+    }
+
+    function addToSession(d){
+      sessionCard.hidden = false;
+      var fig = document.createElement("figure");
+      fig.innerHTML = "<img src='" + d.thumb_url + "'><figcaption>" + esc(d.position) + "</figcaption>";
+      sessionStrip.insertBefore(fig, sessionStrip.firstChild);
+    }
+
+    function esc(s){ return (s==null?"":String(s)).replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+
+    // init
+    applyAspect(); applyOpacity(); loadGuide(); startCamera();
+    window.addEventListener("pagehide", stopCamera);
+  })();
+  </script>
+{% endblock %}

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Patients · Valley Medical{% endblock %}
+{% block nav %}patients{% endblock %}
+{% block content %}
+  <div class="page-head" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+    <h1 style="margin:0">Patients <span class="muted" style="font-size:1rem;font-weight:400">({{ total }})</span></h1>
+    <a class="btn" href="/photos">Take progress photos</a>
+  </div>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  <div class="card">
+    <form method="get" action="/patients" style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <input type="text" name="q" value="{{ q }}" placeholder="Search name, email, or phone…"
+             style="flex:1;min-width:220px;padding:.6rem .8rem;border:1px solid var(--line);border-radius:8px">
+      <button class="btn" type="submit">Search</button>
+      {% if q %}<a class="btn ghost" href="/patients">Clear</a>{% endif %}
+    </form>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+      <h2 style="font-size:1.05rem;margin:0;color:#5E6B51">Add a patient</h2>
+    </div>
+    <form method="post" action="/patients/new" class="pt-form">
+      <div class="pt-grid">
+        <label class="field"><span>First name</span><input type="text" name="first_name"></label>
+        <label class="field"><span>Last name</span><input type="text" name="last_name"></label>
+        <label class="field"><span>Email</span><input type="email" name="email"></label>
+        <label class="field"><span>Phone</span><input type="text" name="phone"></label>
+        <label class="field"><span>Date of birth</span><input type="date" name="dob"></label>
+      </div>
+      <label class="field"><span>Notes</span><textarea name="notes" rows="2"></textarea></label>
+      <div style="margin-top:.6rem"><button class="btn" type="submit">Add patient</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.05rem;margin:0 0 .4rem;color:#5E6B51">Import from GoHighLevel</h2>
+    <p class="muted" style="margin:.1rem 0 .7rem">One-time (and repeatable) pull of your GoHighLevel contacts into this
+      local directory. Existing patients are matched by their GHL link and updated, not duplicated.</p>
+    {% if ghl_enabled %}
+    <form method="post" action="/patients/import-ghl"
+          onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Importing… this can take a minute';">
+      <button class="btn secondary" type="submit">Import contacts now</button>
+    </form>
+    {% else %}
+    <p class="muted" style="margin:0">GoHighLevel isn't connected, so there's nothing to import. You can still add patients by hand above.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.05rem;margin:0 0 .6rem;color:#5E6B51">
+      {{ 'Search results' if q else 'All patients' }}</h2>
+    {% if patients %}
+    <div class="pt-list">
+      {% for p in patients %}
+      <a class="pt-row" href="/patients/{{ p.id }}">
+        <div class="pt-avatar">{{ (p.first_name or p.last_name or '?')[0]|upper }}</div>
+        <div class="pt-main">
+          <div class="pt-name">{{ (p.first_name ~ ' ' ~ p.last_name)|trim or ('Patient #' ~ p.id) }}</div>
+          <div class="pt-sub muted">{{ p.email or '' }}{% if p.email and p.phone %} · {% endif %}{{ p.phone or '' }}</div>
+        </div>
+        {% if p.ghl_contact_id %}<span class="badge" title="Linked to GoHighLevel">GHL</span>{% endif %}
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+      <p class="muted" style="margin:0">{{ 'No patients match that search.' if q else 'No patients yet — add one above or import from GoHighLevel.' }}</p>
+    {% endif %}
+  </div>
+
+  <style>
+    .pt-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.7rem; }
+    .pt-form .field{ display:flex; flex-direction:column; gap:.25rem; margin-top:.5rem; }
+    .pt-form .field > span{ font-size:.8rem; font-weight:600; color:var(--muted); }
+    .pt-form input, .pt-form textarea{ width:100%; box-sizing:border-box; padding:.55rem .7rem;
+      border:1px solid var(--line); border-radius:8px; background:var(--surface,#fff); color:inherit; font-size:.95rem; }
+    .pt-list{ display:flex; flex-direction:column; }
+    .pt-row{ display:flex; align-items:center; gap:.8rem; padding:.7rem .4rem; border-top:1px solid var(--line);
+      text-decoration:none; color:inherit; }
+    .pt-row:first-child{ border-top:0; }
+    .pt-row:hover{ background:#faf9f6; }
+    .pt-avatar{ width:38px; height:38px; border-radius:50%; background:#7D8B6E; color:#fff; font-weight:700;
+      display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+    .pt-name{ font-weight:600; }
+    .pt-sub{ font-size:.82rem; }
+  </style>
+{% endblock %}

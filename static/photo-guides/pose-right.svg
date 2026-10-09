@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" width="300" height="400" fill="none">
+  <style>
+    .frame{stroke:#5E6B51;stroke-opacity:.5;stroke-width:2;stroke-dasharray:6 6}
+    .center{stroke:#5E6B51;stroke-opacity:.35;stroke-width:1.5;stroke-dasharray:4 6}
+    .land{stroke:#5E6B51;stroke-opacity:.35;stroke-width:1;stroke-dasharray:3 5}
+    .lab{fill:#5E6B51;fill-opacity:.6;font:600 9px -apple-system,Arial,sans-serif;letter-spacing:.08em}
+    .body{stroke:#5E6B51;stroke-opacity:.8;stroke-width:2.4;stroke-linejoin:round;stroke-linecap:round}
+    .tag{fill:#5E6B51;fill-opacity:.85;font:700 16px Georgia,serif}
+  </style>
+  <rect x="10" y="10" width="280" height="380" rx="10" class="frame"/>
+  <line x1="150" y1="14" x2="150" y2="386" class="center"/>
+  <line x1="14" y1="150" x2="286" y2="150" class="land"/><text x="18" y="146" class="lab">HIPS</text>
+  <line x1="14" y1="250" x2="286" y2="250" class="land"/><text x="18" y="246" class="lab">KNEES</text>
+  <line x1="14" y1="360" x2="286" y2="360" class="land"/><text x="18" y="356" class="lab">ANKLES</text>
+  <text x="24" y="40" class="tag">RIGHT</text>
+  <g transform="translate(300,0) scale(-1,1)">
+  <path class="body" d="M112 120 h80 a6 6 0 0 1 6 6 v34 h-92 a6 6 0 0 1 -6 -6 v-28 a6 6 0 0 1 6 -6 z"/>
+  <!-- near (left) leg stepped slightly forward -->
+  <path class="body" d="M120 160 C112 220 108 300 100 360 l18 0 C124 300 134 220 148 166"/>
+  <!-- far leg -->
+  <path class="body" d="M176 160 C182 220 184 300 182 360 l16 0 C196 300 190 220 160 166"/>
+  <path class="body" d="M98 360 q-12 8 -4 16 q12 6 24 0 l0 -14"/>
+  <path class="body" d="M182 360 q8 10 -2 16 q-12 4 -18 -2 l0 -14"/>
+  </g>
+</svg>

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}{{ label }} · Patients{% endblock %}
+{% block nav %}patients{% endblock %}
+{% block content %}
+  <div class="page-head" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+    <h1 style="margin:0"><a href="/patients" class="muted" style="text-decoration:none">Patients</a> › {{ label }}</h1>
+    {% if can_photos %}<a class="btn" href="/photos?patient_id={{ patient.id }}">Take progress photos</a>{% endif %}
+  </div>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  <div class="card">
+    <details>
+      <summary style="cursor:pointer;font-weight:600;color:#5E6B51">Patient details</summary>
+      <form method="post" action="/patients/{{ patient.id }}/edit" class="pt-form" style="margin-top:.6rem">
+        <div class="pt-grid">
+          <label class="field"><span>First name</span><input type="text" name="first_name" value="{{ patient.first_name }}"></label>
+          <label class="field"><span>Last name</span><input type="text" name="last_name" value="{{ patient.last_name }}"></label>
+          <label class="field"><span>Email</span><input type="email" name="email" value="{{ patient.email or '' }}"></label>
+          <label class="field"><span>Phone</span><input type="text" name="phone" value="{{ patient.phone or '' }}"></label>
+          <label class="field"><span>Date of birth</span><input type="date" name="dob" value="{{ patient.dob or '' }}"></label>
+          <label class="field"><span>GoHighLevel contact ID</span><input type="text" name="ghl_contact_id" value="{{ patient.ghl_contact_id or '' }}" placeholder="optional link"></label>
+        </div>
+        <label class="field"><span>Notes</span><textarea name="notes" rows="3">{{ patient.notes or '' }}</textarea></label>
+        <div style="margin-top:.6rem"><button class="btn" type="submit">Save details</button></div>
+      </form>
+    </details>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+      <h2 style="font-size:1.1rem;margin:0;color:#5E6B51">Progress photos <span class="muted" style="font-weight:400">({{ photo_count }})</span></h2>
+      {% if can_photos %}<a class="btn secondary" href="/photos?patient_id={{ patient.id }}">+ Add photos</a>{% endif %}
+    </div>
+
+    {% if photo_count == 0 %}
+      <p class="muted" style="margin:.8rem 0 0">No photos yet.{% if can_photos %} Tap “Add photos” to start a baseline set.{% endif %}</p>
+    {% else %}
+      {% for position, shots in photos_by_position.items() %}
+      <div class="ph-pos">
+        <div class="ph-pos-head">{{ position }} <span class="muted" style="font-weight:400">· {{ shots|length }} over time</span></div>
+        <div class="ph-strip">
+          {% for ph in shots %}
+          <figure class="ph-card">
+            <a href="/photos/file/{{ ph.id }}" target="_blank" rel="noopener">
+              <img src="/photos/thumb/{{ ph.id }}" alt="{{ position }} on {{ ph.created_at }}" loading="lazy">
+            </a>
+            <figcaption>
+              <div class="ph-date">{{ ph.created_at[:10] }}</div>
+              {% if ph.framing_score is not none %}
+                <div class="ph-score {{ 'good' if ph.framing_score >= 85 else ('mid' if ph.framing_score >= 70 else 'low') }}"
+                     title="{{ ph.framing_note }}">framing {{ ph.framing_score }}%</div>
+              {% endif %}
+              <div class="ph-actions">
+                <a href="/photos/orig/{{ ph.id }}" title="Download original">⬇</a>
+                <form method="post" action="/photos/{{ ph.id }}/delete?back=/patients/{{ patient.id }}"
+                      onsubmit="return confirm('Delete this photo permanently?')">
+                  <button type="submit" title="Delete">🗑</button>
+                </form>
+              </div>
+            </figcaption>
+          </figure>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+
+  <style>
+    .pt-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.7rem; }
+    .pt-form .field{ display:flex; flex-direction:column; gap:.25rem; margin-top:.5rem; }
+    .pt-form .field > span{ font-size:.8rem; font-weight:600; color:var(--muted); }
+    .pt-form input, .pt-form textarea{ width:100%; box-sizing:border-box; padding:.55rem .7rem;
+      border:1px solid var(--line); border-radius:8px; background:var(--surface,#fff); color:inherit; font-size:.95rem; }
+    .ph-pos{ margin-top:1.1rem; }
+    .ph-pos-head{ font-weight:700; color:#2A2B27; margin-bottom:.5rem; }
+    .ph-strip{ display:flex; gap:.8rem; overflow-x:auto; padding-bottom:.4rem; }
+    .ph-card{ margin:0; flex:0 0 auto; width:150px; }
+    .ph-card img{ width:150px; height:200px; object-fit:cover; border-radius:10px; border:1px solid var(--line); background:#f3f1ec; display:block; }
+    .ph-card figcaption{ margin-top:.3rem; }
+    .ph-date{ font-size:.78rem; color:var(--muted); }
+    .ph-score{ font-size:.72rem; font-weight:700; margin-top:.15rem; display:inline-block; padding:.05rem .35rem; border-radius:999px; }
+    .ph-score.good{ background:#e4ecd9; color:#4e5944; }
+    .ph-score.mid{ background:#fbf0d6; color:#8a6d1f; }
+    .ph-score.low{ background:#fbe0da; color:#8a2c20; }
+    .ph-actions{ display:flex; gap:.5rem; align-items:center; margin-top:.25rem; }
+    .ph-actions a, .ph-actions button{ background:none; border:0; cursor:pointer; font-size:.95rem; text-decoration:none; color:var(--muted); padding:0; }
+    .ph-actions form{ display:inline; }
+  </style>
+{% endblock %}

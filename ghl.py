@@ -403,6 +403,56 @@ def search_contacts(location_id: str, query: str, limit: int = 10) -> list[dict]
     return out
 
 
+def list_all_contacts(location_id: str, max_contacts: int = 5000) -> list[dict]:
+    """
+    Page through every contact in the location — used for the one-time import
+    into the local patient directory. Defensive about GHL's pagination shape:
+    it follows the meta startAfter/startAfterId cursor and stops when a page is
+    empty, the cursor stops advancing, or the cap is reached.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    start_after = None
+    start_after_id = None
+    for _ in range(200):  # hard page cap (200 * 100 = 20k) as a safety net
+        params = {"locationId": location_id, "limit": 100}
+        if start_after is not None:
+            params["startAfter"] = start_after
+        if start_after_id is not None:
+            params["startAfterId"] = start_after_id
+        data = _get("/contacts/", params=params)
+        rows = (data.get("contacts") if isinstance(data, dict) else None) or []
+        if not rows:
+            break
+        new_this_page = 0
+        for c in rows:
+            cid = str(_first(c, "id", "_id", default=""))
+            if not cid or cid in seen:
+                continue
+            seen.add(cid)
+            new_this_page += 1
+            out.append({
+                "id": cid,
+                "first_name": _first(c, "firstName", default="") or "",
+                "last_name": _first(c, "lastName", default="") or "",
+                "name": _first(c, "contactName", "name", default="") or "",
+                "email": _first(c, "email", default="") or "",
+                "phone": _first(c, "phone", default="") or "",
+            })
+            if len(out) >= max_contacts:
+                return out
+        if new_this_page == 0:
+            break
+        meta = (data.get("meta") if isinstance(data, dict) else None) or {}
+        next_after = meta.get("startAfter")
+        next_after_id = meta.get("startAfterId")
+        # Stop if the cursor didn't advance (prevents an infinite loop).
+        if next_after_id in (None, start_after_id) and next_after in (None, start_after):
+            break
+        start_after, start_after_id = next_after, next_after_id
+    return out
+
+
 def list_workflows(location_id: str) -> list[dict]:
     """All workflows for a location (id + name), for the reminder mapping page."""
     data = _get("/workflows/", params={"locationId": location_id})
