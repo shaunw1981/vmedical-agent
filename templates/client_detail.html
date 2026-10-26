@@ -6,12 +6,30 @@
   {% set can_charlie_text = charlie_text_enabled and contact and contact.phone %}
   {% if can_charlie_text %}<input type="checkbox" id="charlie-text-modal" class="visually-hidden modal-toggle">{% endif %}
   <div class="page-head">
-    <h1 style="margin:0">{{ contact.name if contact else 'Client record' }}</h1>
+    <h1 style="margin:0">{{ contact.name if contact else 'Contact record' }}</h1>
     <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-      {% if can_charlie_text %}<label for="charlie-text-modal" class="btn">Text with Charlie</label>{% endif %}
-      <a class="btn ghost" href="/clients">← All clients</a>
+      {% if linked_patient %}
+        <a class="btn" href="/patients/{{ linked_patient.id }}">✓ Patient record →</a>
+      {% elif contact %}
+        <form method="post" action="/patients/convert" style="display:inline">
+          <input type="hidden" name="contact_id" value="{{ contact_id }}">
+          <input type="hidden" name="first_name" value="{{ contact.first or '' }}">
+          <input type="hidden" name="last_name" value="{{ contact.last or '' }}">
+          <input type="hidden" name="email" value="{{ contact.email or '' }}">
+          <input type="hidden" name="phone" value="{{ contact.phone or '' }}">
+          <button class="btn" type="submit" title="Create a local patient record linked to this contact">+ Convert to patient</button>
+        </form>
+      {% endif %}
+      {% if can_charlie_text %}<label for="charlie-text-modal" class="btn ghost">Text with Charlie</label>{% endif %}
+      <a class="btn ghost" href="/clients">← All contacts</a>
     </div>
   </div>
+
+  {% if linked_patient %}
+  <div class="banner ok" style="margin-bottom:1rem">✓ This contact is a patient —
+    clinical notes, treatments, and progress photos live on their
+    <a href="/patients/{{ linked_patient.id }}">local patient record</a>.</div>
+  {% endif %}
 
   {% if can_charlie_text %}
   <div class="modal-overlay">

@@ -50,7 +50,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.24.1")
+app = FastAPI(title="vmedical-agent dashboard", version="4.25.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -590,18 +590,50 @@ def client_detail(request: Request, contact_id: str, debug: int = 0):
     email = (contact or {}).get("email", "")
     local_appts = db.list_appointments_for(ghl_contact_id=contact_id, email=email, phone=phone)
     calls = db.list_messages_for_phone(phone) if phone else []
+    linked_patient = db.get_patient_by_ghl(contact_id)
 
     return templates.TemplateResponse(
         "client_detail.html",
         _ctx(request, user,
              contact_id=contact_id, contact=contact, notes=notes,
              ghl_appts=ghl_appts, local_appts=local_appts, calls=calls,
+             linked_patient=linked_patient,
              errors=errors, fmt_appt=reminders.format_appt, fmt_dt=reminders.format_iso,
              ghl_enabled=config.ghl_contacts_enabled(),
              charlie_text_enabled=(config.charlie_conversations_enabled()
                                    and config.can(user["role"], "use_inbox")),
              flash=request.session.pop("client_flash", None)),
     )
+
+
+# --- Contacts: canonical path aliases (the section is labelled "Contacts") ----
+@app.get("/contacts")
+def contacts_alias(request: Request):
+    return RedirectResponse("/clients", status_code=307)
+
+
+@app.get("/contacts/{contact_id}")
+def contact_alias(request: Request, contact_id: str):
+    return RedirectResponse(f"/clients/{contact_id}", status_code=307)
+
+
+# --- Convert a contact into a local patient record ---------------------------
+@app.post("/patients/convert")
+def patients_convert(request: Request, contact_id: str = Form(...),
+                     first_name: str = Form(""), last_name: str = Form(""),
+                     email: str = Form(""), phone: str = Form("")):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    existing = db.get_patient_by_ghl(contact_id)
+    if existing:
+        request.session["patients_flash"] = {"ok": True, "msg": "This contact is already a patient — opened their record."}
+        return RedirectResponse(f"/patients/{existing['id']}", status_code=303)
+    pid = db.create_patient(first_name, last_name, email, phone,
+                            ghl_contact_id=contact_id, created_by=user["email"])
+    request.session["patients_flash"] = {"ok": True,
+        "msg": f"Patient record created from contact{(' — ' + (first_name + ' ' + last_name).strip()) if (first_name or last_name) else ''}."}
+    return RedirectResponse(f"/patients/{pid}", status_code=303)
 
 
 @app.post("/clients/{contact_id}/edit")

@@ -1,14 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Clients · Spa Dashboard{% endblock %}
+{% block title %}Contacts · Spa Dashboard{% endblock %}
 {% block nav %}clients{% endblock %}
 {% block content %}
   {% if search_enabled %}<input type="checkbox" id="add-contact-modal" class="visually-hidden modal-toggle">{% endif %}
   <div class="page-head">
-    <h1 style="margin:0">Clients</h1>
+    <h1 style="margin:0">Contacts</h1>
     {% if search_enabled %}<label for="add-contact-modal" class="btn">+ Add contact</label>{% endif %}
   </div>
   <p class="muted" style="margin:.1rem 0 1.1rem">
-    Open a client to see their contact details, notes, and appointment history.</p>
+    Your GoHighLevel contacts — leads, enquiries, and anyone who's reached out. Open a contact to see
+    their details, notes, and appointment history, or <strong>convert them to a patient</strong> to start a local clinical record.</p>
 
   {% if flash %}
   <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
