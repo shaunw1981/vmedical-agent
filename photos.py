@@ -140,6 +140,27 @@ def store(patient: dict, position: dict, image_bytes: bytes, taken_by: str = "",
     }
 
 
+def store_document(patient: dict, data: bytes, filename: str) -> dict:
+    """
+    Save an uploaded document to the patient's local _documents folder.
+    Returns {rel_path, size}. Nothing leaves the machine.
+    """
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", (filename or "file")).strip("._") or "file"
+    folder_rel = f"{patient_folder_name(patient)}/_documents"
+    (root() / folder_rel).mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    rel = f"{folder_rel}/{stamp}-{safe}"
+    dest = root() / rel
+    # Avoid clobbering if two files share a second.
+    i = 2
+    while dest.exists():
+        rel = f"{folder_rel}/{stamp}-{i}-{safe}"
+        dest = root() / rel
+        i += 1
+    dest.write_bytes(data)
+    return {"rel_path": rel, "size": len(data)}
+
+
 def delete_files(*rel_paths: Optional[str]) -> None:
     for rel in rel_paths:
         if not rel:

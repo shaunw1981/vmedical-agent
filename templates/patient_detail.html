@@ -32,6 +32,95 @@
     </details>
   </div>
 
+  {# ---- Quick add: note + treatment ---- #}
+  <div class="pd-quick">
+    <div class="card">
+      <h2 class="pd-h2">Add a note</h2>
+      <form method="post" action="/patients/{{ patient.id }}/notes">
+        <textarea name="body" rows="3" placeholder="Clinical note, observation, phone call…" required
+          style="width:100%;box-sizing:border-box;padding:.6rem .7rem;border:1px solid var(--line);border-radius:8px;font:inherit"></textarea>
+        <div style="margin-top:.5rem"><button class="btn" type="submit">Add note</button></div>
+      </form>
+    </div>
+    <div class="card">
+      <h2 class="pd-h2">Log a treatment / visit</h2>
+      <form method="post" action="/patients/{{ patient.id }}/treatments" class="pt-form">
+        <div class="pt-grid">
+          <label class="field"><span>Date</span><input type="date" name="treatment_date"></label>
+          <label class="field"><span>Procedure</span><input type="text" name="procedure" placeholder="e.g. Sclerotherapy" required></label>
+          <label class="field"><span>Provider</span><input type="text" name="provider" placeholder="e.g. Dr Smith"></label>
+        </div>
+        <label class="field"><span>Notes</span><textarea name="notes" rows="2" placeholder="Optional"></textarea></label>
+        <div style="margin-top:.5rem"><button class="btn" type="submit">Log treatment</button></div>
+      </form>
+    </div>
+  </div>
+
+  {# ---- History timeline ---- #}
+  <div class="card" id="history">
+    <h2 class="pd-h2">History <span class="muted" style="font-weight:400">({{ timeline|length }})</span></h2>
+    {% if timeline %}
+    <div class="tl">
+      {% for e in timeline %}
+      <div class="tl-item {{ e.kind }}">
+        <div class="tl-dot"></div>
+        <div class="tl-body">
+          <div class="tl-meta">
+            <span class="tl-tag {{ e.kind }}">{{ 'Treatment' if e.kind == 'treatment' else 'Note' }}</span>
+            <span class="tl-date">{{ e.at[:10] if e.at else '' }}</span>
+            {% if e.kind == 'note' and e.author %}<span class="muted">· {{ e.author }}</span>{% endif %}
+            {% if e.kind == 'treatment' and e.created_by %}<span class="muted">· {{ e.created_by }}</span>{% endif %}
+          </div>
+          {% if e.kind == 'treatment' %}
+            <div class="tl-title">{{ e.procedure }}{% if e.provider %} <span class="muted" style="font-weight:400">· {{ e.provider }}</span>{% endif %}</div>
+            {% if e.notes %}<div class="tl-text">{{ e.notes }}</div>{% endif %}
+            <form method="post" action="/patients/{{ patient.id }}/treatments/{{ e.id }}/delete" class="tl-del"
+                  onsubmit="return confirm('Delete this treatment entry?')"><button type="submit" title="Delete">🗑</button></form>
+          {% else %}
+            <div class="tl-text">{{ e.body }}</div>
+            <form method="post" action="/patients/{{ patient.id }}/notes/{{ e.id }}/delete" class="tl-del"
+                  onsubmit="return confirm('Delete this note?')"><button type="submit" title="Delete">🗑</button></form>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+      <p class="muted" style="margin:.4rem 0 0">No notes or treatments yet — add one above.</p>
+    {% endif %}
+  </div>
+
+  {# ---- Documents ---- #}
+  <div class="card" id="documents">
+    <h2 class="pd-h2">Documents <span class="muted" style="font-weight:400">({{ documents|length }})</span></h2>
+    <form method="post" action="/patients/{{ patient.id }}/documents" enctype="multipart/form-data"
+          style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:flex-end;margin-bottom:.6rem">
+      <label class="field" style="flex:1;min-width:160px"><span>Label (optional)</span>
+        <input type="text" name="label" placeholder="e.g. Consent form"></label>
+      <input type="file" name="document" required>
+      <button class="btn" type="submit">Upload</button>
+    </form>
+    {% if documents %}
+    <div class="doc-list">
+      {% for d in documents %}
+      <div class="doc-row">
+        <a class="doc-main" href="/patients/{{ patient.id }}/documents/{{ d.id }}" target="_blank" rel="noopener">
+          <span class="doc-icon">📄</span>
+          <span>
+            <span class="doc-name">{{ d.label or d.filename }}</span>
+            <span class="doc-sub muted">{{ d.filename }}{% if d.size %} · {{ (d.size/1024)|round|int }} KB{% endif %} · {{ d.created_at[:10] }}</span>
+          </span>
+        </a>
+        <form method="post" action="/patients/{{ patient.id }}/documents/{{ d.id }}/delete"
+              onsubmit="return confirm('Delete this document?')"><button class="doc-del" type="submit" title="Delete">🗑</button></form>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+      <p class="muted" style="margin:0">No documents yet.</p>
+    {% endif %}
+  </div>
+
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
       <h2 style="font-size:1.1rem;margin:0;color:#5E6B51">Progress photos <span class="muted" style="font-weight:400">({{ photo_count }})</span></h2>
@@ -73,6 +162,36 @@
   </div>
 
   <style>
+    .pd-h2{ font-size:1.05rem; margin:0 0 .6rem; color:#5E6B51; }
+    .pd-quick{ display:grid; grid-template-columns:1fr 1fr; gap:1.1rem; }
+    .pd-quick .card{ margin-bottom:1.1rem; }
+    @media (max-width:760px){ .pd-quick{ grid-template-columns:1fr; } }
+    /* timeline */
+    .tl{ position:relative; margin-left:.2rem; }
+    .tl-item{ position:relative; padding:0 0 1rem 1.4rem; border-left:2px solid var(--line); }
+    .tl-item:last-child{ border-left-color:transparent; }
+    .tl-dot{ position:absolute; left:-7px; top:3px; width:12px; height:12px; border-radius:50%;
+      background:#7D8B6E; border:2px solid #fff; }
+    .tl-item.treatment .tl-dot{ background:#5E6B51; }
+    .tl-meta{ font-size:.78rem; color:var(--muted); display:flex; gap:.4rem; align-items:center; flex-wrap:wrap; }
+    .tl-tag{ font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+      padding:.05rem .4rem; border-radius:999px; background:#eef0ea; color:#5E6B51; }
+    .tl-tag.treatment{ background:#e4ecd9; color:#4e5944; }
+    .tl-title{ font-weight:700; margin:.15rem 0; }
+    .tl-text{ white-space:pre-wrap; font-size:.95rem; margin:.1rem 0; }
+    .tl-body{ position:relative; }
+    .tl-del{ position:absolute; top:0; right:0; }
+    .tl-del button{ background:none; border:0; cursor:pointer; color:var(--muted); font-size:.9rem; }
+    /* documents */
+    .doc-list{ display:flex; flex-direction:column; }
+    .doc-row{ display:flex; align-items:center; justify-content:space-between; gap:.6rem;
+      padding:.55rem .2rem; border-top:1px solid var(--line); }
+    .doc-row:first-child{ border-top:0; }
+    .doc-main{ display:flex; align-items:center; gap:.6rem; text-decoration:none; color:inherit; flex:1; }
+    .doc-icon{ font-size:1.3rem; }
+    .doc-name{ font-weight:600; display:block; }
+    .doc-sub{ font-size:.78rem; display:block; }
+    .doc-del{ background:none; border:0; cursor:pointer; color:var(--muted); }
     .pt-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.7rem; }
     .pt-form .field{ display:flex; flex-direction:column; gap:.25rem; margin-top:.5rem; }
     .pt-form .field > span{ font-size:.8rem; font-weight:600; color:var(--muted); }

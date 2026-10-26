@@ -50,7 +50,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.25.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.26.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -2156,13 +2156,135 @@ def patient_detail(request: Request, patient_id: int):
     by_pos: dict = {}
     for ph in photos_rows:
         by_pos.setdefault(ph.get("position_name") or "Other", []).append(ph)
+
+    notes = db.list_patient_notes(patient_id)
+    treatments = db.list_patient_treatments(patient_id)
+    documents = db.list_patient_documents(patient_id)
+
+    # Unified history timeline: notes + treatments (newest first).
+    timeline = []
+    for n in notes:
+        timeline.append({"kind": "note", "at": n["created_at"], "id": n["id"],
+                         "author": n.get("author"), "body": n["body"]})
+    for t in treatments:
+        timeline.append({"kind": "treatment", "at": t.get("treatment_date") or t["created_at"],
+                         "id": t["id"], "procedure": t["procedure"], "provider": t.get("provider"),
+                         "notes": t.get("notes"), "created_by": t.get("created_by")})
+    timeline.sort(key=lambda e: e["at"] or "", reverse=True)
+
     return templates.TemplateResponse(
         "patient_detail.html",
         _ctx(request, user, patient=patient, label=_patient_label(patient),
              photos_by_position=by_pos, photo_count=len(photos_rows),
+             timeline=timeline, documents=documents,
              can_photos=config.can(user["role"], "manage_photos"),
              flash=request.session.pop("patients_flash", None)),
     )
+
+
+@app.post("/patients/{patient_id}/notes")
+def patient_add_note(request: Request, patient_id: int, body: str = Form(...)):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    if (body or "").strip():
+        db.add_patient_note(patient_id, body, author=user["email"])
+        request.session["patients_flash"] = {"ok": True, "msg": "Note added."}
+    else:
+        request.session["patients_flash"] = {"ok": False, "msg": "Note was empty."}
+    return RedirectResponse(f"/patients/{patient_id}#history", status_code=303)
+
+
+@app.post("/patients/{patient_id}/notes/{note_id}/delete")
+def patient_delete_note(request: Request, patient_id: int, note_id: int):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    db.delete_patient_note(note_id)
+    request.session["patients_flash"] = {"ok": True, "msg": "Note deleted."}
+    return RedirectResponse(f"/patients/{patient_id}#history", status_code=303)
+
+
+@app.post("/patients/{patient_id}/treatments")
+def patient_add_treatment(request: Request, patient_id: int, procedure: str = Form(...),
+                          treatment_date: str = Form(""), provider: str = Form(""),
+                          notes: str = Form("")):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    if (procedure or "").strip():
+        db.add_patient_treatment(patient_id, procedure, treatment_date, provider, notes,
+                                 created_by=user["email"])
+        request.session["patients_flash"] = {"ok": True, "msg": "Treatment logged."}
+    else:
+        request.session["patients_flash"] = {"ok": False, "msg": "Enter a procedure/treatment name."}
+    return RedirectResponse(f"/patients/{patient_id}#history", status_code=303)
+
+
+@app.post("/patients/{patient_id}/treatments/{treatment_id}/delete")
+def patient_delete_treatment(request: Request, patient_id: int, treatment_id: int):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    db.delete_patient_treatment(treatment_id)
+    request.session["patients_flash"] = {"ok": True, "msg": "Treatment removed."}
+    return RedirectResponse(f"/patients/{patient_id}#history", status_code=303)
+
+
+@app.post("/patients/{patient_id}/documents")
+async def patient_add_document(request: Request, patient_id: int,
+                               label: str = Form(""), document: UploadFile = File(...)):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    patient = db.get_patient(patient_id)
+    if not patient:
+        return JSONResponse({"error": "unknown patient"}, status_code=404)
+    data = await document.read()
+    if not data:
+        request.session["patients_flash"] = {"ok": False, "msg": "No file received."}
+        return RedirectResponse(f"/patients/{patient_id}#documents", status_code=303)
+    try:
+        saved = photos_svc.store_document(patient, data, document.filename or "file")
+        db.add_patient_document(patient_id, label, document.filename or "file", saved["rel_path"],
+                                document.content_type or "application/octet-stream",
+                                saved["size"], uploaded_by=user["email"])
+        request.session["patients_flash"] = {"ok": True, "msg": "Document uploaded."}
+    except Exception as exc:  # noqa: BLE001
+        request.session["patients_flash"] = {"ok": False, "msg": f"Couldn't save document: {exc}"}
+    return RedirectResponse(f"/patients/{patient_id}#documents", status_code=303)
+
+
+@app.get("/patients/{patient_id}/documents/{doc_id}")
+def patient_get_document(request: Request, patient_id: int, doc_id: int):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    doc = db.get_patient_document(doc_id)
+    if not doc or doc["patient_id"] != patient_id:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    try:
+        path = photos_svc.abs_path(doc["stored_path"])
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "bad path"}, status_code=400)
+    if not path.exists():
+        return JSONResponse({"error": "file missing"}, status_code=404)
+    return FileResponse(str(path), media_type=doc.get("mime") or "application/octet-stream",
+                        filename=doc.get("filename") or f"document-{doc_id}",
+                        headers={"Cache-Control": "private, max-age=600"})
+
+
+@app.post("/patients/{patient_id}/documents/{doc_id}/delete")
+def patient_delete_document(request: Request, patient_id: int, doc_id: int):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    doc = db.get_patient_document(doc_id)
+    if doc and doc["patient_id"] == patient_id:
+        photos_svc.delete_files(doc.get("stored_path"))
+        db.delete_patient_document(doc_id)
+        request.session["patients_flash"] = {"ok": True, "msg": "Document deleted."}
+    return RedirectResponse(f"/patients/{patient_id}#documents", status_code=303)
 
 
 @app.post("/patients/{patient_id}/edit")

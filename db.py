@@ -254,6 +254,41 @@ def init_db() -> None:
                 framing_note   TEXT,
                 taken_by       TEXT
             );
+
+            -- Clinical notes on a patient (local).
+            CREATE TABLE IF NOT EXISTS patient_notes (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at  TEXT NOT NULL,
+                patient_id  INTEGER NOT NULL,
+                author      TEXT,
+                body        TEXT NOT NULL
+            );
+
+            -- Treatment / visit log on a patient (local).
+            CREATE TABLE IF NOT EXISTS patient_treatments (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at     TEXT NOT NULL,
+                patient_id     INTEGER NOT NULL,
+                treatment_date TEXT,            -- 'YYYY-MM-DD'
+                procedure      TEXT NOT NULL,
+                provider       TEXT,
+                notes          TEXT,
+                created_by     TEXT
+            );
+
+            -- Document / file attachments on a patient. Files live on disk;
+            -- this table records metadata + the local path.
+            CREATE TABLE IF NOT EXISTS patient_documents (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at   TEXT NOT NULL,
+                patient_id   INTEGER NOT NULL,
+                label        TEXT,
+                filename     TEXT,
+                stored_path  TEXT,             -- relative to the photo/data root
+                mime         TEXT,
+                size         INTEGER,
+                uploaded_by  TEXT
+            );
             """
         )
         # Lightweight migrations: add columns that newer versions expect, so an
@@ -798,6 +833,79 @@ def count_patient_photos(patient_id: int) -> int:
     with _connect() as conn:
         return conn.execute("SELECT COUNT(*) FROM patient_photos WHERE patient_id = ?",
                            (patient_id,)).fetchone()[0]
+
+
+# --- Patient clinical notes --------------------------------------------------
+def add_patient_note(patient_id: int, body: str, author: str = "") -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO patient_notes (created_at, patient_id, author, body) VALUES (?,?,?,?)",
+            (datetime.now().isoformat(timespec="seconds"), patient_id, author, body.strip()))
+        return int(cur.lastrowid)
+
+
+def list_patient_notes(patient_id: int) -> list[dict]:
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM patient_notes WHERE patient_id = ? ORDER BY id DESC", (patient_id,))]
+
+
+def delete_patient_note(note_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM patient_notes WHERE id = ?", (note_id,))
+
+
+# --- Patient treatments / visits ---------------------------------------------
+def add_patient_treatment(patient_id: int, procedure: str, treatment_date: str = "",
+                          provider: str = "", notes: str = "", created_by: str = "") -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO patient_treatments (created_at, patient_id, treatment_date, procedure, "
+            "provider, notes, created_by) VALUES (?,?,?,?,?,?,?)",
+            (datetime.now().isoformat(timespec="seconds"), patient_id, (treatment_date or "").strip(),
+             procedure.strip(), (provider or "").strip(), (notes or "").strip(), created_by))
+        return int(cur.lastrowid)
+
+
+def list_patient_treatments(patient_id: int) -> list[dict]:
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM patient_treatments WHERE patient_id = ? "
+            "ORDER BY COALESCE(treatment_date, created_at) DESC, id DESC", (patient_id,))]
+
+
+def delete_patient_treatment(treatment_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM patient_treatments WHERE id = ?", (treatment_id,))
+
+
+# --- Patient documents -------------------------------------------------------
+def add_patient_document(patient_id: int, label: str, filename: str, stored_path: str,
+                         mime: str, size: int, uploaded_by: str = "") -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO patient_documents (created_at, patient_id, label, filename, stored_path, "
+            "mime, size, uploaded_by) VALUES (?,?,?,?,?,?,?,?)",
+            (datetime.now().isoformat(timespec="seconds"), patient_id, (label or "").strip(),
+             filename, stored_path, mime, size, uploaded_by))
+        return int(cur.lastrowid)
+
+
+def list_patient_documents(patient_id: int) -> list[dict]:
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM patient_documents WHERE patient_id = ? ORDER BY id DESC", (patient_id,))]
+
+
+def get_patient_document(doc_id: int) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM patient_documents WHERE id = ?", (doc_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def delete_patient_document(doc_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM patient_documents WHERE id = ?", (doc_id,))
 
 
 # --- Settings (small key/value store, e.g. reminder workflow mapping) --------
