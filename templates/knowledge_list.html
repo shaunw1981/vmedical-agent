@@ -23,6 +23,28 @@
       its very next answer.</p>
   </div>
 
+  {% if vault_ok and brain_ready %}
+  <div class="card">
+    <details>
+      <summary style="cursor:pointer;font-weight:600;color:#5E6B51">Import a Markdown file</summary>
+      <p class="muted" style="margin:.5rem 0 .7rem;font-size:.9rem">Upload a <code>.md</code> document and it's
+        split into one note per <code>##</code> heading — handy for loading a whole knowledge document at once
+        (e.g. your website service &amp; product export). Re-importing overwrites notes with the same name, so
+        you can refresh it whenever the source changes.</p>
+      <form method="post" action="/knowledge/import" enctype="multipart/form-data"
+            style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end">
+        <label class="field" style="flex:1;min-width:180px;display:flex;flex-direction:column;gap:.25rem">
+          <span style="font-size:.8rem;font-weight:600;color:var(--muted)">Note name prefix (optional)</span>
+          <input type="text" name="prefix" value="Valley Medical KB"
+                 style="padding:.5rem .7rem;border:1px solid var(--line);border-radius:8px">
+        </label>
+        <input type="file" name="file" accept=".md,.markdown,text/markdown,text/plain" required>
+        <button class="btn" type="submit">Import</button>
+      </form>
+    </details>
+  </div>
+  {% endif %}
+
   {% if not vault_ok %}
     <div class="banner" style="background:#fff7ed;border-color:#fed7aa;color:#9a3412">
       The Obsidian vault isn't connected yet. Set <code>OBSIDIAN_VAULT_PATH</code> in <code>.env</code>

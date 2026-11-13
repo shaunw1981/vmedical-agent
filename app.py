@@ -51,7 +51,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.27.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.28.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1584,6 +1584,30 @@ def knowledge_save(request: Request, name: str = Form(...), content: str = Form(
     fname = obsidian.write_knowledge(name, content)
     request.session["kb_flash"] = {"ok": True, "msg": f"Saved “{fname}”. Charlie will use it on its next answer."}
     return RedirectResponse(f"/knowledge/edit?name={quote(fname)}", status_code=303)
+
+
+@app.post("/knowledge/import")
+async def knowledge_import(request: Request, prefix: str = Form(""),
+                           file: UploadFile = File(...)):
+    user, resp = _guard(request, "manage_knowledge")
+    if resp:
+        return resp
+    if not obsidian.is_configured():
+        request.session["kb_flash"] = {"ok": False, "msg": "The Obsidian vault isn't set up (set OBSIDIAN_VAULT_PATH)."}
+        return RedirectResponse("/knowledge", status_code=303)
+    data = await file.read()
+    if not data:
+        request.session["kb_flash"] = {"ok": False, "msg": "No file received."}
+        return RedirectResponse("/knowledge", status_code=303)
+    text = data.decode("utf-8", errors="replace")
+    res = obsidian.import_markdown(text, prefix=prefix)
+    if res.get("ok"):
+        request.session["kb_flash"] = {"ok": True,
+            "msg": f"Imported {res['count']} note{'s' if res['count'] != 1 else ''} from {file.filename}. "
+                   "Charlie will use them on its next answer."}
+    else:
+        request.session["kb_flash"] = {"ok": False, "msg": res.get("error", "Couldn't import the file.")}
+    return RedirectResponse("/knowledge", status_code=303)
 
 
 @app.post("/knowledge/delete")

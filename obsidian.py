@@ -315,6 +315,70 @@ def delete_knowledge(name: str) -> bool:
     return False
 
 
+def _split_markdown(md: str) -> tuple[list[str], list[dict]]:
+    """Split a markdown document into sections at each top-level '## ' heading.
+    Returns (preamble_lines, [{heading, lines}, ...]). '###' etc. stay inside
+    their parent section."""
+    lines = (md or "").replace("\r", "").split("\n")
+    preamble: list[str] = []
+    sections: list[dict] = []
+    cur: Optional[dict] = None
+    for line in lines:
+        if re.match(r"^##\s", line) and not line.startswith("###"):
+            if cur:
+                sections.append(cur)
+            cur = {"heading": line[2:].strip().lstrip("# ").strip(), "lines": [line]}
+        elif cur is None:
+            preamble.append(line)
+        else:
+            cur["lines"].append(line)
+    if cur:
+        sections.append(cur)
+    return preamble, sections
+
+
+def _tidy_body(lines: list[str]) -> str:
+    """Join a section's lines and trim trailing blank lines / horizontal rules."""
+    while lines and lines[-1].strip() in ("", "---", "***", "___"):
+        lines = lines[:-1]
+    return ("\n".join(lines).strip() + "\n") if lines else ""
+
+
+def import_markdown(md: str, prefix: str = "") -> dict:
+    """
+    Split an uploaded markdown document into one knowledge note per '## ' section
+    and write them to the vault. Returns {ok, created:[filenames], count} or an
+    error. Each note is named after its heading (leading 'N.' numbering removed),
+    optionally with a prefix so the set groups together in the vault.
+    """
+    d = _knowledge_dir()
+    if not d:
+        return {"ok": False, "error": "The Obsidian vault isn't set up."}
+    preamble, sections = _split_markdown(md)
+    if not sections:
+        return {"ok": False, "error": "No '## ' section headings found to split on."}
+
+    prefix = (prefix or "").strip().rstrip("—-").strip()
+    created: list[str] = []
+
+    # Keep the document's title/source preamble as an overview note for provenance.
+    pre_text = _tidy_body(list(preamble))
+    if pre_text.strip():
+        over_name = f"{prefix} — Overview & source" if prefix else "Overview & source"
+        fn = write_knowledge(over_name, pre_text)
+        if fn:
+            created.append(fn)
+
+    for s in sections:
+        heading = re.sub(r"^\d+[.)]\s*", "", s["heading"]).strip() or "Section"
+        name = f"{prefix} — {heading}" if prefix else heading
+        fn = write_knowledge(name, _tidy_body(list(s["lines"])))
+        if fn:
+            created.append(fn)
+
+    return {"ok": True, "created": created, "count": len(created)}
+
+
 def _persona_path() -> Optional[Path]:
     b = _brain_dir()
     return (b / "Persona.md") if b else None
