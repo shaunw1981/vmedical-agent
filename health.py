@@ -114,6 +114,33 @@ def check_email() -> dict:
     return {"name": "Email sending", "level": "off", "detail": "Not configured."}
 
 
+def check_backups() -> dict:
+    """Read the nightly backup's status file so a silent failure can't hide."""
+    try:
+        sf = Path(db.DB_PATH).parent / "backup-status.txt"
+        if not sf.exists():
+            return {"name": "Backups", "level": "off",
+                    "detail": "Not set up yet (macmini/install-backup.command)."}
+        parts = sf.read_text(encoding="utf-8").strip().split()
+        ts = parts[0] if parts else ""
+        state = parts[1] if len(parts) > 1 else ""
+        extra = (" · " + " ".join(parts[2:])) if len(parts) > 2 else ""
+        age_h = None
+        try:
+            from datetime import datetime as _dt
+            age_h = (_dt.now() - _dt.fromisoformat(ts)).total_seconds() / 3600
+        except Exception:  # noqa: BLE001
+            pass
+        if state == "FAIL":
+            return {"name": "Backups", "level": "down", "detail": f"Last backup FAILED — {ts}{extra}"}
+        if age_h is not None and age_h > 36:
+            return {"name": "Backups", "level": "warn",
+                    "detail": f"No successful backup in {age_h:.0f}h — last {ts}{extra}"}
+        return {"name": "Backups", "level": "ok", "detail": f"Last backup {ts}{extra}"}
+    except Exception as exc:  # noqa: BLE001
+        return {"name": "Backups", "level": "warn", "detail": f"Couldn't read backup status: {exc}"}
+
+
 # --- Aggregates --------------------------------------------------------------
 def basic_health() -> tuple[dict, bool]:
     """Light check for the public /health probe. Returns (payload, ok)."""
@@ -137,6 +164,7 @@ def full_status() -> dict:
         {"name": "Dashboard app", "level": "ok", "detail": "Serving requests."},
         check_database(),
         check_disk(),
+        check_backups(),
         check_ollama(),
         check_obsidian(),
         check_email(),
