@@ -171,7 +171,10 @@ def init_db() -> None:
                 status        TEXT NOT NULL DEFAULT 'new',   -- 'new' or 'responded'
                 responded_by  TEXT,
                 responded_at  TEXT,
-                dedupe_key    TEXT UNIQUE      -- so a retry/double-submit is ignored
+                dedupe_key    TEXT UNIQUE,     -- so a retry/double-submit is ignored
+                source        TEXT NOT NULL DEFAULT 'website', -- 'website' | 'inbound-email'
+                ghl_contact_id TEXT,           -- link back to the GoHighLevel contact
+                reply_text    TEXT             -- the reply the team emailed, if any
             );
 
             CREATE TABLE IF NOT EXISTS blog_posts (
@@ -327,6 +330,13 @@ def init_db() -> None:
         appt_cols = {row["name"] for row in conn.execute("PRAGMA table_info(appointments)")}
         if appt_cols and "ghl_appointment_id" not in appt_cols:
             conn.execute("ALTER TABLE appointments ADD COLUMN ghl_appointment_id TEXT")
+        web_cols = {row["name"] for row in conn.execute("PRAGMA table_info(web_messages)")}
+        if web_cols and "source" not in web_cols:
+            conn.execute("ALTER TABLE web_messages ADD COLUMN source TEXT NOT NULL DEFAULT 'website'")
+        if web_cols and "ghl_contact_id" not in web_cols:
+            conn.execute("ALTER TABLE web_messages ADD COLUMN ghl_contact_id TEXT")
+        if web_cols and "reply_text" not in web_cols:
+            conn.execute("ALTER TABLE web_messages ADD COLUMN reply_text TEXT")
 
         # Seed the default photo positions once (if the table is empty). Order
         # matches the clinic's reference poses: A=front, B/C=side, D=back.
@@ -509,20 +519,37 @@ def mark_message_responded(message_id: int, responded_by: str) -> None:
 # --- Website contact-form messages (folded into the Messages inbox) ----------
 def add_web_message(name: Optional[str], email: Optional[str], phone: Optional[str],
                     subject: Optional[str], message: str, page: Optional[str] = None,
-                    dedupe_key: Optional[str] = None) -> Optional[int]:
+                    dedupe_key: Optional[str] = None, source: str = "website",
+                    ghl_contact_id: Optional[str] = None) -> Optional[int]:
     """
-    Store a website enquiry. Returns the new id, or None if it was a duplicate
+    Store a website/GHL enquiry. Returns the new id, or None if it was a duplicate
     (same dedupe_key already seen — a retry or double-submit).
     """
     with _connect() as conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO web_messages "
-            "(created_at, name, email, phone, subject, message, page, status, dedupe_key) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?)",
+            "(created_at, name, email, phone, subject, message, page, status, dedupe_key, "
+            "source, ghl_contact_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?)",
             (datetime.now().isoformat(timespec="seconds"),
-             name, email, phone, subject, message, page, dedupe_key),
+             name, email, phone, subject, message, page, dedupe_key, source, ghl_contact_id),
         )
         return int(cur.lastrowid) if cur.rowcount else None
+
+
+def get_web_message(web_message_id: int) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM web_messages WHERE id = ?", (web_message_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def set_web_message_reply(web_message_id: int, reply_text: str, responded_by: str) -> None:
+    """Record a reply the team emailed and mark the enquiry responded."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE web_messages SET reply_text = ?, status = 'responded', responded_by = ?, "
+            "responded_at = ? WHERE id = ?",
+            (reply_text, responded_by, datetime.now().isoformat(timespec="seconds"), web_message_id),
+        )
 
 
 def list_web_messages(status: Optional[str] = None) -> list[dict]:

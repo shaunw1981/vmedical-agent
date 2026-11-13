@@ -322,6 +322,9 @@ def email_monitor_enabled() -> bool:
 SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com").strip() or "smtp.gmail.com"
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587") or "587")
 SMTP_FROM = os.environ.get("SMTP_FROM", "").strip()  # defaults to IMAP_USER
+# The address replies to website/enquiry contacts are sent FROM (and Reply-To).
+# The sending mailbox must be allowed to send as this address.
+CLINIC_REPLY_FROM = os.environ.get("CLINIC_REPLY_FROM", "hello@vmedical.ca").strip() or "hello@vmedical.ca"
 
 
 def email_send_enabled() -> bool:

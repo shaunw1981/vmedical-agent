@@ -15,6 +15,10 @@
     </div>
   </div>
 
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
   {% if status_counts %}
   <div class="kpi-row">
     {{ ui.kpi_tile('New', status_counts.new + (web_new or 0)) }}
@@ -27,14 +31,14 @@
     <div class="card"><p class="muted" style="margin:.2rem 0">No messages here yet.</p></div>
   {% else %}
     {% for m in messages %}
-    {% if m.source == 'website' %}
+    {% if m.source in ('website', 'inbound-email') %}
     <div class="msg-card {{ 'is-responded' if m.status == 'responded' }}">
       <div class="msg-head">
         <div class="msg-who">
           <div class="avatar">{{ (m.name or m.email or '?')[0]|upper }}</div>
           <div>
             <div class="name">{{ m.name or 'Website visitor' }}
-              <span class="tag" style="margin-left:.4rem">Website</span></div>
+              <span class="tag" style="margin-left:.4rem">{{ 'Email enquiry' if m.source == 'inbound-email' else 'Website' }}</span></div>
             <div class="meta">
               {% if m.email %}{{ m.email }}{% endif %}
               {% if m.phone %}&nbsp;·&nbsp; {{ m.phone }}{% endif %}
@@ -63,7 +67,28 @@
       </div>
       {% endif %}
       <div class="raw-transcript" style="margin-top:.6rem">{{ m.message }}</div>
-      {% if m.email %}
+
+      {% if m.reply_text %}
+      <div class="wm-reply">
+        <div class="wm-reply-label">Your reply · sent from {{ reply_from }}</div>
+        <div class="wm-reply-body">{{ m.reply_text }}</div>
+      </div>
+      {% endif %}
+
+      {% if m.email and m.status != 'responded' and can(user.role, 'respond_messages') %}
+      <details class="wm-replybox" {{ 'open' if m.source == 'inbound-email' }}>
+        <summary class="btn secondary" style="display:inline-block">Reply by email</summary>
+        <form method="post" action="/messages/web/{{ m.id }}/reply" style="margin-top:.5rem">
+          <div class="muted" style="font-size:.8rem;margin-bottom:.3rem">To {{ m.email }} · from <strong>{{ reply_from }}</strong></div>
+          <textarea name="reply" rows="4" required placeholder="Type your reply…"
+            style="width:100%;box-sizing:border-box;padding:.6rem .7rem;border:1px solid var(--line);border-radius:8px;font:inherit"></textarea>
+          <div style="margin-top:.5rem;display:flex;gap:.5rem">
+            <button class="btn" type="submit">Send reply</button>
+            <button class="btn ghost" type="submit" formaction="/messages/web/{{ m.id }}/respond" formnovalidate>Just mark replied</button>
+          </div>
+        </form>
+      </details>
+      {% elif m.email and m.status != 'responded' %}
       <div style="margin-top:.6rem">
         <a class="btn secondary" href="mailto:{{ m.email }}{% if m.subject %}?subject=Re: {{ m.subject|urlencode }}{% endif %}">Reply by email</a>
       </div>
@@ -136,4 +161,13 @@
     {% endif %}
     {% endfor %}
   {% endif %}
+
+  <style>
+    .wm-replybox{ margin-top:.6rem; }
+    .wm-replybox > summary{ list-style:none; cursor:pointer; }
+    .wm-replybox > summary::-webkit-details-marker{ display:none; }
+    .wm-reply{ margin-top:.6rem; border-left:3px solid #7D8B6E; padding:.4rem .7rem; background:#f6f7f3; border-radius:0 8px 8px 0; }
+    .wm-reply-label{ font-size:.74rem; color:var(--muted); font-weight:600; margin-bottom:.2rem; }
+    .wm-reply-body{ white-space:pre-wrap; font-size:.92rem; }
+  </style>
 {% endblock %}

@@ -51,7 +51,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.30.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.31.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1315,7 +1315,10 @@ def messages_inbox(request: Request, status: str = "new", debug: int = 0):
             "notify_email_enabled": mailer.enabled(),
             "web_new": db.count_new_web_messages(),
             "web_total": len(db.list_web_messages()),
+            "ghl_webhook_secret_set": bool(config.GHL_WEBHOOK_SECRET),
+            "reply_from": config.CLINIC_REPLY_FROM,
             "last_web_contact_payload": db.get_setting("web_contact_last_webhook"),
+            "last_inbound_email_payload": db.get_setting("inbound_email_last_webhook"),
         }, indent=2, default=str))
     status_filter = None if status == "all" else status
 
@@ -1327,7 +1330,7 @@ def messages_inbox(request: Request, status: str = "new", debug: int = 0):
         m["source"] = "phone"
         items.append(m)
     for w in db.list_web_messages(status_filter):
-        w["source"] = "website"
+        w["source"] = w.get("source") or "website"
         items.append(w)
     # One inbox, newest first across both sources.
     items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
@@ -1336,7 +1339,9 @@ def messages_inbox(request: Request, status: str = "new", debug: int = 0):
         "messages.html",
         _ctx(request, user, messages=items, active_filter=status,
              status_counts=db.status_breakdown(),
-             web_new=db.count_new_web_messages()),
+             web_new=db.count_new_web_messages(),
+             reply_from=config.CLINIC_REPLY_FROM,
+             flash=request.session.pop("messages_flash", None)),
     )
 
 
@@ -1356,6 +1361,120 @@ def respond_web_message(request: Request, web_message_id: int):
         return resp
     db.mark_web_message_responded(web_message_id, user["email"])
     return RedirectResponse("/messages", status_code=303)
+
+
+@app.post("/messages/web/{web_message_id}/reply")
+def reply_web_message(request: Request, web_message_id: int, reply: str = Form(...)):
+    """Email a reply to a website/enquiry contact FROM hello@vmedical.ca, then
+    mark it responded and (best-effort) log the reply back on the GHL contact."""
+    user, resp = _guard(request, "respond_messages")
+    if resp:
+        return resp
+    w = db.get_web_message(web_message_id)
+    if not w:
+        request.session["messages_flash"] = {"ok": False, "msg": "That enquiry wasn't found."}
+        return RedirectResponse("/messages", status_code=303)
+    body = (reply or "").strip()
+    to = (w.get("email") or "").strip()
+    if not to:
+        request.session["messages_flash"] = {"ok": False, "msg": "This enquiry has no email address to reply to."}
+        return RedirectResponse("/messages", status_code=303)
+    if not body:
+        request.session["messages_flash"] = {"ok": False, "msg": "Write a reply before sending."}
+        return RedirectResponse("/messages", status_code=303)
+    if not mailer.enabled():
+        request.session["messages_flash"] = {"ok": False, "msg": "Email sending isn't set up (IMAP_USER / IMAP_PASSWORD)."}
+        return RedirectResponse("/messages", status_code=303)
+
+    subject = "Re: " + (w.get("subject") or "your enquiry to Valley Medical")
+    try:
+        mailer.send_email(to, subject, body,
+                          from_addr=config.CLINIC_REPLY_FROM, reply_to=config.CLINIC_REPLY_FROM)
+    except Exception as exc:  # noqa: BLE001
+        request.session["messages_flash"] = {"ok": False, "msg": f"Couldn't send the reply: {exc}"}
+        return RedirectResponse("/messages", status_code=303)
+
+    db.set_web_message_reply(web_message_id, body, user["email"])
+    # Keep GoHighLevel in sync: log the reply as a note on the contact.
+    if w.get("ghl_contact_id") and config.ghl_contacts_enabled():
+        try:
+            ghl.add_contact_note(w["ghl_contact_id"],
+                                 f"Email reply sent via the dashboard by {user['email']}:\n\n{body}")
+        except Exception:  # noqa: BLE001 - best effort
+            pass
+    request.session["messages_flash"] = {"ok": True, "msg": f"Reply sent to {to} from {config.CLINIC_REPLY_FROM}."}
+    return RedirectResponse("/messages", status_code=303)
+
+
+@app.post("/webhook/ghl/inbound-email")
+async def ghl_inbound_email_webhook(request: Request):
+    """
+    A GoHighLevel workflow (trigger: contact tagged 'inbound-email') POSTs the
+    contact + enquiry here. Protect with GHL_WEBHOOK_SECRET (?secret=… or the
+    X-Webhook-Secret header). Field names are matched forgivingly. Lands in the
+    Messages inbox so the team can reply by email.
+    """
+    if config.GHL_WEBHOOK_SECRET:
+        provided = request.query_params.get("secret") or request.headers.get("x-webhook-secret", "")
+        if provided != config.GHL_WEBHOOK_SECRET:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "expected JSON"}, status_code=400)
+
+    contact_id = _field(payload, "contact_id", "contactId", "contactID", "id")
+    name = _field(payload, "full_name", "fullName", "name", "contactName", "contact_name")
+    if not name:
+        name = f"{_field(payload, 'first_name', 'firstName') or ''} {_field(payload, 'last_name', 'lastName') or ''}".strip() or None
+    email = _field(payload, "email", "email_address", "emailAddress")
+    phone = _field(payload, "phone", "phone_number", "tel")
+    subject = _field(payload, "subject", "topic", "reason")
+    message = _field(payload, "message", "body", "notes", "inquiry", "inquiry_message",
+                     "comments", "question", "details", "enquiry")
+
+    try:
+        import json as _json
+        db.set_setting("inbound_email_last_webhook", _json.dumps(granola._redact(payload))[:4000])
+    except Exception:  # noqa: BLE001
+        pass
+
+    message = (str(message).strip() if message else "")
+    if not message and not (name or email or phone or contact_id):
+        return JSONResponse({"status": "ignored_incomplete"}, status_code=200)
+    if not message:
+        message = "(No message text was included — follow up with the contact.)"
+
+    import hashlib
+    basis = "|".join(str(x or "") for x in (contact_id, email, subject, message))
+    dedupe_key = "ie:" + hashlib.sha256(basis.encode("utf-8")).hexdigest()
+
+    new_id = db.add_web_message(
+        name=(str(name).strip() if name else None),
+        email=(str(email).strip() if email else None),
+        phone=(str(phone).strip() if phone else None),
+        subject=(str(subject).strip() if subject else None),
+        message=message, page="inbound-email", dedupe_key=dedupe_key,
+        source="inbound-email", ghl_contact_id=(str(contact_id).strip() if contact_id else None),
+    )
+    if new_id is None:
+        return {"status": "duplicate_ignored"}
+
+    notify_to = config.WEBSITE_NOTIFY_EMAIL or config.INBOX_ESCALATION_EMAIL
+    if notify_to and mailer.enabled():
+        who = (str(name).strip() if name else None) or (str(email).strip() if email else None) or "Website enquiry"
+        lines = [f"New email enquiry from {who}.", ""]
+        if name:    lines.append(f"Name:    {str(name).strip()}")
+        if email:   lines.append(f"Email:   {str(email).strip()}")
+        if phone:   lines.append(f"Phone:   {str(phone).strip()}")
+        if subject: lines.append(f"Subject: {str(subject).strip()}")
+        lines += ["", "Message:", message, "", "Reply to it in the dashboard under Messages."]
+        try:
+            mailer.send_email(notify_to, f"New email enquiry from {who}", "\n".join(lines))
+        except Exception:  # noqa: BLE001 - best effort
+            pass
+
+    return {"status": "saved", "id": new_id}
 
 
 # --- Content (blog posts → WordPress) ----------------------------------------
