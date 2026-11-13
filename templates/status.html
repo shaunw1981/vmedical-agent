@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Status · Valley Medical{% endblock %}
+{% block nav %}status{% endblock %}
+{% block content %}
+  <div class="page-head" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+    <h1 style="margin:0">System status</h1>
+    <a class="btn ghost" href="/status">↻ Refresh</a>
+  </div>
+
+  <div class="st-overall {{ status.overall }}">
+    <span class="st-big-dot"></span>
+    <div>
+      <div class="st-headline">
+        {% if status.overall == 'ok' %}All systems operational
+        {% elif status.overall == 'degraded' %}Running, with {{ status.warn }} warning{{ 's' if status.warn != 1 }}
+        {% else %}Attention needed — {{ status.down }} problem{{ 's' if status.down != 1 }}{% endif %}
+      </div>
+      <div class="muted" style="font-size:.85rem">Checked just now · app v{{ app_version }}</div>
+    </div>
+  </div>
+
+  <div class="card">
+    {% for c in status.checks %}
+    <div class="st-row">
+      <span class="st-dot {{ c.level }}"></span>
+      <div class="st-main">
+        <div class="st-name">{{ c.name }}</div>
+        <div class="st-detail muted">{{ c.detail }}</div>
+      </div>
+      <span class="st-badge {{ c.level }}">
+        {{ {'ok':'OK','warn':'Warning','down':'Down','off':'Off'}[c.level] }}</span>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1rem;margin:0 0 .4rem;color:#5E6B51">Uptime alerts</h2>
+    <p class="muted" style="margin:0;font-size:.9rem">An external monitor watches
+      <code>https://dashboard.vmedicalassist.ca/health</code> from outside and alerts if the Mac, its
+      internet, or this app goes down. This page is the at-a-glance internal view; the external monitor
+      is what pages you when something breaks.</p>
+  </div>
+
+  <style>
+    .st-overall{ display:flex; align-items:center; gap:1rem; padding:1rem 1.2rem; border-radius:12px;
+      margin-bottom:1.1rem; border:1px solid var(--line); }
+    .st-overall.ok{ background:#edf3e4; border-color:#cfe0bc; }
+    .st-overall.degraded{ background:#fbf3df; border-color:#eeddb0; }
+    .st-overall.down{ background:#fbe4de; border-color:#f0c4b8; }
+    .st-big-dot{ width:16px; height:16px; border-radius:50%; flex:0 0 auto; }
+    .st-overall.ok .st-big-dot{ background:#5a9a3c; }
+    .st-overall.degraded .st-big-dot{ background:#d79a1e; }
+    .st-overall.down .st-big-dot{ background:#c6462c; }
+    .st-headline{ font-weight:700; font-size:1.1rem; }
+    .st-row{ display:flex; align-items:center; gap:.8rem; padding:.7rem .2rem; border-top:1px solid var(--line); }
+    .st-row:first-child{ border-top:0; }
+    .st-dot{ width:11px; height:11px; border-radius:50%; flex:0 0 auto; }
+    .st-dot.ok{ background:#5a9a3c; } .st-dot.warn{ background:#d79a1e; }
+    .st-dot.down{ background:#c6462c; } .st-dot.off{ background:#b8bcb2; }
+    .st-main{ flex:1; min-width:0; }
+    .st-name{ font-weight:600; }
+    .st-detail{ font-size:.82rem; }
+    .st-badge{ font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+      padding:.1rem .5rem; border-radius:999px; flex:0 0 auto; }
+    .st-badge.ok{ background:#e4ecd9; color:#41632a; } .st-badge.warn{ background:#fbf0d6; color:#8a6d1f; }
+    .st-badge.down{ background:#fbe0da; color:#8a2c20; } .st-badge.off{ background:#eceee9; color:#6b6f66; }
+  </style>
+{% endblock %}

@@ -38,6 +38,7 @@ import db
 import email_monitor
 import ghl
 import granola
+import health as health_svc
 import inbox as inbox_svc
 import mailer
 import meetings as meetings_svc
@@ -50,7 +51,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.26.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.27.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -145,11 +146,22 @@ def _guard(request: Request, capability=None):
 # --- Health ------------------------------------------------------------------
 @app.get("/health")
 def health():
-    return {
-        "status": "ok",
-        "google_login": auth.google_configured(),
-        "obsidian": obsidian.is_configured(),
-    }
+    """Public probe for the external uptime monitor. Light checks only; returns
+    HTTP 503 when something critical (database unreadable / disk full) is wrong,
+    so a plain status-code monitor flags it. Stays 'ok' on minor warnings to
+    avoid false alerts — those show on the /status page instead."""
+    payload, ok = health_svc.basic_health()
+    return JSONResponse(payload, status_code=200 if ok else 503)
+
+
+@app.get("/status", response_class=HTMLResponse)
+def status_page(request: Request):
+    user, resp = _guard(request)
+    if resp:
+        return resp
+    return templates.TemplateResponse(
+        "status.html", _ctx(request, user, status=health_svc.full_status(),
+                            app_version=app.version))
 
 
 # --- Auth --------------------------------------------------------------------

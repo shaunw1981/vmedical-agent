@@ -64,6 +64,9 @@
     {% if can(user.role, 'manage_users') %}
     <a class="nav-link {{ 'active' if nav_current == 'team' }}" href="/admin/users">Team</a>
     {% endif %}
+    {% if can(user.role, 'manage_settings') %}
+    <a class="nav-link {{ 'active' if nav_current == 'status' }}" href="/status">Status</a>
+    {% endif %}
   </nav>
 
   <a class="nav-link logout" href="/logout">Log out</a>
