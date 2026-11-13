@@ -19,7 +19,7 @@ if ! grep -qE '^HEALTHCHECK_PING_URL=.+' "$APP_DIR/.env" 2>/dev/null; then
     echo "    1) Create a check at https://healthchecks.io (free) and copy its ping URL."
     echo "    2) Add this line to your .env:  HEALTHCHECK_PING_URL=https://hc-ping.com/your-uuid"
     echo "    3) Run this installer again."
-    read -r -p "Press Return to close." _
+    [ -t 0 ] && read -r -p "Press Return to close." _ || true
     exit 1
 fi
 
@@ -42,9 +42,18 @@ cat > "$PLIST" <<PLIST
 </plist>
 PLIST
 
-launchctl unload "$PLIST" 2>/dev/null || true
-launchctl load "$PLIST"
+# Load into the per-user GUI domain so it persists after an SSH session ends
+# (a plain `launchctl load` over SSH would die with the session). Falls back to
+# the legacy load if bootstrap isn't available.
+UID_NUM="$(id -u)"
+DOMAIN="gui/${UID_NUM}"
+launchctl bootout "${DOMAIN}/${LABEL}" 2>/dev/null || true
+if ! launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null; then
+    launchctl unload "$PLIST" 2>/dev/null || true
+    launchctl load "$PLIST" 2>/dev/null || true
+fi
+launchctl kickstart "${DOMAIN}/${LABEL}" 2>/dev/null || true
 
 echo "✅ Heartbeat scheduled — it will ping every 2 minutes starting now."
 echo "   Check your Healthchecks.io dashboard; it should show a ping within a minute."
-read -r -p "Press Return to close." _
+[ -t 0 ] && read -r -p "Press Return to close." _ || true
