@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Charlie's learning · Valley Medical{% endblock %}
+{% block nav %}charlie{% endblock %}
+{% block content %}
+  <div class="page-head" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+    <h1 style="margin:0"><a href="/charlie" class="muted" style="text-decoration:none">Charlie</a> › Learning &amp; memory</h1>
+    <a class="btn ghost" href="/charlie">← Back to Ask Charlie</a>
+  </div>
+
+  {% if flash %}
+  <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  <div class="card">
+    <p class="muted" style="margin:.2rem 0">Charlie learns from feedback and content, but nothing enters its memory
+      until you approve it here. Two memories, with a hard wall between them:</p>
+    <div class="lrn-legend">
+      <span><span class="lrn-dot public"></span><strong>Public</strong> — patient-facing chat &amp; texts can use it. No personal data, ever.</span>
+      <span><span class="lrn-dot internal"></span><strong>Internal</strong> — staff only. Can reference clients. The patient-facing Charlie can't read it.</span>
+    </div>
+    <p class="muted" style="font-size:.82rem;margin:.6rem 0 0">
+      In memory now: <strong>{{ public_mem|length }}</strong> public ·
+      <strong>{{ internal_mem|length }}</strong> internal note{{ 's' if internal_mem|length != 1 }}.
+      Anything that looks like a name, email or phone is blocked from public memory automatically.</p>
+  </div>
+
+  {# ---- Pending queue ---- #}
+  <div class="card">
+    <h2 class="lrn-h2">Pending review <span class="muted" style="font-weight:400">({{ pending|length }})</span></h2>
+    {% if not pending %}
+      <p class="muted" style="margin:.3rem 0 0">Nothing waiting. Propose a learning from the
+        <a href="/charlie">Ask Charlie</a> page.</p>
+    {% else %}
+      {% for L in pending %}
+      <form method="post" action="/charlie/learnings/{{ L.id }}/approve" class="lrn-item">
+        <div class="lrn-meta">
+          <span class="lrn-tag {{ L.source }}">{{ L.source }}</span>
+          <span class="muted">proposed by {{ L.created_by or 'team' }} · {{ L.created_at[:16]|replace('T',' ') }}</span>
+        </div>
+        {% if L.pii_note %}<div class="lrn-pii">⚠️ {{ L.pii_note }}</div>{% endif %}
+        <label class="lrn-field"><span>What Charlie should learn</span>
+          <textarea name="body" rows="3">{{ L.body }}</textarea></label>
+        {% if L.context %}<div class="lrn-context"><span class="muted">Context:</span> {{ L.context }}</div>{% endif %}
+        <div class="lrn-row">
+          <label class="lrn-field" style="flex:1"><span>Save as (title)</span>
+            <input type="text" name="title" value="{{ L.title }}"></label>
+          <label class="lrn-field"><span>Memory</span>
+            <select name="scope">
+              <option value="public" {{ 'selected' if L.scope == 'public' }}>Public</option>
+              <option value="internal" {{ 'selected' if L.scope == 'internal' }}>Internal</option>
+            </select></label>
+        </div>
+        <div class="lrn-actions">
+          <button class="btn" type="submit">Approve &amp; learn</button>
+          <button class="btn ghost" type="submit" formaction="/charlie/learnings/{{ L.id }}/reject" formnovalidate>Dismiss</button>
+        </div>
+      </form>
+      {% endfor %}
+    {% endif %}
+  </div>
+
+  {# ---- Recent decisions ---- #}
+  {% if recent %}
+  <div class="card">
+    <details>
+      <summary class="lrn-h2" style="cursor:pointer">Recently decided</summary>
+      <div style="margin-top:.5rem">
+        {% for L in recent %}
+        <div class="lrn-decided">
+          <span class="lrn-state {{ L.status }}">{{ L.status }}</span>
+          <span class="lrn-state scope {{ L.scope }}">{{ L.scope }}</span>
+          <span class="lrn-decided-body">{{ L.title or (L.body[:80] ~ '…') }}</span>
+          <span class="muted" style="font-size:.76rem">{{ L.decided_by or '' }}</span>
+          <form method="post" action="/charlie/learnings/{{ L.id }}/delete" style="display:inline"
+                onsubmit="return confirm('Remove from this list? (Does not delete an already-learned note.)')">
+            <button class="lrn-x" type="submit" title="Remove from list">×</button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+    <p class="muted" style="font-size:.78rem;margin:.6rem 0 0">Approved learnings live in your Obsidian vault under
+      <code>Charlie/Memory/Public</code> and <code>Charlie/Memory/Internal</code> — edit or delete them there or in the
+      Knowledge section anytime.</p>
+  </div>
+  {% endif %}
+
+  <style>
+    .lrn-h2{ font-size:1.05rem; margin:0 0 .5rem; color:#5E6B51; }
+    .lrn-legend{ display:flex; flex-direction:column; gap:.3rem; margin:.6rem 0 0; font-size:.88rem; }
+    .lrn-dot{ width:11px; height:11px; border-radius:50%; display:inline-block; margin-right:.4rem; }
+    .lrn-dot.public{ background:#5a9a3c; } .lrn-dot.internal{ background:#b06a2c; }
+    .lrn-item{ border-top:1px solid var(--line); padding:.9rem 0; }
+    .lrn-item:first-of-type{ border-top:0; }
+    .lrn-meta{ display:flex; gap:.5rem; align-items:center; font-size:.78rem; margin-bottom:.4rem; }
+    .lrn-tag{ font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+      padding:.05rem .4rem; border-radius:999px; background:#eef0ea; color:#5E6B51; }
+    .lrn-pii{ background:#fbf0d6; color:#8a6d1f; border-radius:8px; padding:.4rem .6rem; font-size:.82rem; margin-bottom:.4rem; }
+    .lrn-field{ display:flex; flex-direction:column; gap:.25rem; margin-top:.4rem; }
+    .lrn-field > span{ font-size:.78rem; font-weight:600; color:var(--muted); }
+    .lrn-field textarea, .lrn-field input, .lrn-field select{ width:100%; box-sizing:border-box; padding:.5rem .65rem;
+      border:1px solid var(--line); border-radius:8px; font:inherit; font-size:.95rem; background:#fff; color:inherit; }
+    .lrn-row{ display:flex; gap:.7rem; flex-wrap:wrap; align-items:flex-end; }
+    .lrn-row .lrn-field select{ min-width:120px; }
+    .lrn-context{ font-size:.82rem; margin-top:.4rem; }
+    .lrn-actions{ display:flex; gap:.5rem; margin-top:.6rem; }
+    .lrn-decided{ display:flex; align-items:center; gap:.5rem; padding:.4rem 0; border-top:1px solid var(--line); font-size:.88rem; }
+    .lrn-decided:first-child{ border-top:0; }
+    .lrn-decided-body{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .lrn-state{ font-size:.68rem; font-weight:700; text-transform:uppercase; padding:.05rem .4rem; border-radius:999px; }
+    .lrn-state.approved{ background:#e4ecd9; color:#41632a; } .lrn-state.rejected{ background:#eceae6; color:#777; }
+    .lrn-state.scope.public{ background:#e4ecd9; color:#41632a; } .lrn-state.scope.internal{ background:#f3e6d6; color:#8a5a22; }
+    .lrn-x{ background:none; border:0; cursor:pointer; color:var(--muted); font-size:1.1rem; }
+  </style>
+{% endblock %}

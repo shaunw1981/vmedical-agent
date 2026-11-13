@@ -276,6 +276,24 @@ def init_db() -> None:
                 created_by     TEXT
             );
 
+            -- Charlie's "review-then-learn" queue. A proposed learning waits
+            -- here until a team member approves it into memory (public/internal).
+            CREATE TABLE IF NOT EXISTS charlie_learnings (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at   TEXT NOT NULL,
+                created_by   TEXT,
+                source       TEXT,            -- 'feedback'|'correction'|'content'|'manual'
+                scope        TEXT NOT NULL DEFAULT 'internal',  -- 'public'|'internal'
+                status       TEXT NOT NULL DEFAULT 'pending',   -- 'pending'|'approved'|'rejected'
+                title        TEXT,
+                body         TEXT NOT NULL,
+                context      TEXT,            -- what prompted it (e.g. the Q&A)
+                pii_note     TEXT,            -- why it was flagged as possibly personal
+                decided_by   TEXT,
+                decided_at   TEXT,
+                note_file    TEXT             -- the memory filename once approved
+            );
+
             -- Document / file attachments on a patient. Files live on disk;
             -- this table records metadata + the local path.
             CREATE TABLE IF NOT EXISTS patient_documents (
@@ -906,6 +924,61 @@ def get_patient_document(doc_id: int) -> Optional[dict]:
 def delete_patient_document(doc_id: int) -> None:
     with _connect() as conn:
         conn.execute("DELETE FROM patient_documents WHERE id = ?", (doc_id,))
+
+
+# --- Charlie learnings (review-then-learn queue) -----------------------------
+def add_learning(body: str, scope: str = "internal", source: str = "manual",
+                 title: str = "", context: str = "", pii_note: str = "",
+                 created_by: str = "") -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO charlie_learnings (created_at, created_by, source, scope, status, "
+            "title, body, context, pii_note) VALUES (?,?,?,?,'pending',?,?,?,?)",
+            (datetime.now().isoformat(timespec="seconds"), created_by, source,
+             ("public" if scope == "public" else "internal"), title.strip(),
+             body.strip(), (context or "").strip(), (pii_note or "").strip()))
+        return int(cur.lastrowid)
+
+
+def list_learnings(status: Optional[str] = None, limit: int = 200) -> list[dict]:
+    query = "SELECT * FROM charlie_learnings "
+    params: tuple = ()
+    if status:
+        query += "WHERE status = ? "
+        params = (status,)
+    query += "ORDER BY id DESC LIMIT ?"
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(query, (*params, limit)).fetchall()]
+
+
+def get_learning(learning_id: int) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM charlie_learnings WHERE id = ?", (learning_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def count_pending_learnings() -> int:
+    with _connect() as conn:
+        return conn.execute("SELECT COUNT(*) FROM charlie_learnings WHERE status = 'pending'").fetchone()[0]
+
+
+def decide_learning(learning_id: int, status: str, decided_by: str,
+                    note_file: str = "", scope: Optional[str] = None) -> None:
+    sets = {"status": status, "decided_by": decided_by,
+            "decided_at": datetime.now().isoformat(timespec="seconds")}
+    if note_file:
+        sets["note_file"] = note_file
+    if scope in ("public", "internal"):
+        sets["scope"] = scope
+    cols = ", ".join(f"{k} = ?" for k in sets)
+    with _connect() as conn:
+        conn.execute(f"UPDATE charlie_learnings SET {cols} WHERE id = ?",
+                     (*sets.values(), learning_id))
+
+
+def delete_learning(learning_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM charlie_learnings WHERE id = ?", (learning_id,))
 
 
 # --- Settings (small key/value store, e.g. reminder workflow mapping) --------

@@ -51,7 +51,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.28.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.29.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1027,9 +1027,118 @@ def charlie_page(request: Request, debug: int = 0):
              brain_ready=charlie.brain_ready(),
              history=db.list_charlie_messages(user["email"]),
              pending_action=db.latest_pending_action(user["email"]),
+             pending_learnings=db.count_pending_learnings(),
+             can_review_learnings=config.can(user["role"], "manage_knowledge"),
              error=request.session.pop("charlie_error", None),
              flash=request.session.pop("charlie_flash", None)),
     )
+
+
+# --- Charlie self-learning: review-then-learn --------------------------------
+def _learning_title(body: str) -> str:
+    first = (body or "").strip().splitlines()[0] if (body or "").strip() else "Learning"
+    first = first.lstrip("# ").strip()
+    words = first.split()
+    return (" ".join(words[:9]) + ("…" if len(words) > 9 else "")) or "Learning"
+
+
+@app.post("/charlie/teach")
+def charlie_teach(request: Request, body: str = Form(...), scope: str = Form("public"),
+                  source: str = Form("manual"), context: str = Form("")):
+    user, resp = _guard(request, "use_charlie")
+    if resp:
+        return resp
+    text = (body or "").strip()
+    if not text:
+        request.session["charlie_flash"] = {"ok": False, "msg": "Write what Charlie should learn first."}
+        return RedirectResponse("/charlie", status_code=303)
+    want_scope = "public" if scope == "public" else "internal"
+    pii = charlie.scan_pii(text + " " + (context or ""))
+    pii_note = ""
+    if pii and want_scope == "public":
+        want_scope = "internal"
+        pii_note = "Looks like it contains " + ", ".join(sorted(set(pii))) + " — routed to internal-only."
+    db.add_learning(text, scope=want_scope, source=source, title=_learning_title(text),
+                    context=context, pii_note=pii_note, created_by=user["email"])
+    msg = "Added to Charlie's learning queue for review."
+    if pii_note:
+        msg += " " + pii_note
+    request.session["charlie_flash"] = {"ok": True, "msg": msg}
+    return RedirectResponse("/charlie/learnings", status_code=303)
+
+
+@app.get("/charlie/learnings", response_class=HTMLResponse)
+def charlie_learnings(request: Request):
+    user, resp = _guard(request, "manage_knowledge")
+    if resp:
+        return resp
+    return templates.TemplateResponse(
+        "charlie_learnings.html",
+        _ctx(request, user,
+             pending=db.list_learnings(status="pending"),
+             recent=db.list_learnings(status="approved", limit=20)
+                    + db.list_learnings(status="rejected", limit=10),
+             public_mem=obsidian.list_memory("public"),
+             internal_mem=obsidian.list_memory("internal"),
+             vault_ok=obsidian.is_configured(),
+             flash=request.session.pop("charlie_flash", None)),
+    )
+
+
+@app.post("/charlie/learnings/{learning_id}/approve")
+def charlie_learning_approve(request: Request, learning_id: int, scope: str = Form(""),
+                             title: str = Form(""), body: str = Form("")):
+    user, resp = _guard(request, "manage_knowledge")
+    if resp:
+        return resp
+    L = db.get_learning(learning_id)
+    if not L or L["status"] != "pending":
+        request.session["charlie_flash"] = {"ok": False, "msg": "That learning is no longer pending."}
+        return RedirectResponse("/charlie/learnings", status_code=303)
+    if not obsidian.is_configured():
+        request.session["charlie_flash"] = {"ok": False, "msg": "The Obsidian vault isn't set up."}
+        return RedirectResponse("/charlie/learnings", status_code=303)
+    final_scope = "public" if scope == "public" else ("internal" if scope == "internal" else L["scope"])
+    final_body = (body or "").strip() or L["body"]
+    final_title = (title or "").strip() or L["title"] or _learning_title(final_body)
+
+    if final_scope == "public":
+        pii = charlie.scan_pii(final_body)
+        if pii:
+            request.session["charlie_flash"] = {"ok": False,
+                "msg": ("Can't approve to PUBLIC memory — it contains " + ", ".join(sorted(set(pii)))
+                        + ". Approve it as Internal, or edit out the personal details first.")}
+            return RedirectResponse("/charlie/learnings", status_code=303)
+
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    note = (f"{final_body.strip()}\n\n---\n"
+            f"_Charlie memory · {final_scope} · learned from {L.get('source') or 'manual'} · "
+            f"proposed by {L.get('created_by') or 'team'} · approved by {user['email']} on {stamp}._\n")
+    fname = obsidian.write_memory(final_scope, final_title, note)
+    db.decide_learning(learning_id, "approved", user["email"], note_file=fname or "", scope=final_scope)
+    request.session["charlie_flash"] = {"ok": True,
+        "msg": f"Learned ✓ Added to {final_scope} memory as “{fname}”. Charlie uses it on its next answer."}
+    return RedirectResponse("/charlie/learnings", status_code=303)
+
+
+@app.post("/charlie/learnings/{learning_id}/reject")
+def charlie_learning_reject(request: Request, learning_id: int):
+    user, resp = _guard(request, "manage_knowledge")
+    if resp:
+        return resp
+    db.decide_learning(learning_id, "rejected", user["email"])
+    request.session["charlie_flash"] = {"ok": True, "msg": "Dismissed — Charlie won't learn that."}
+    return RedirectResponse("/charlie/learnings", status_code=303)
+
+
+@app.post("/charlie/learnings/{learning_id}/delete")
+def charlie_learning_delete(request: Request, learning_id: int):
+    user, resp = _guard(request, "manage_knowledge")
+    if resp:
+        return resp
+    db.delete_learning(learning_id)
+    request.session["charlie_flash"] = {"ok": True, "msg": "Removed from the list."}
+    return RedirectResponse("/charlie/learnings", status_code=303)
 
 
 @app.post("/charlie/setup-brain")

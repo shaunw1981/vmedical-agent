@@ -315,6 +315,42 @@ def delete_knowledge(name: str) -> bool:
     return False
 
 
+def _memory_dir(scope: str) -> Optional[Path]:
+    b = _brain_dir()
+    sub = "Public" if (scope or "").lower() == "public" else "Internal"
+    return (b / "Memory" / sub) if b else None
+
+
+def write_memory(scope: str, name: str, content: str) -> Optional[str]:
+    """Write an approved learning into Charlie's memory. scope='public'|'internal'.
+    Public memory is readable by the patient-facing assistant; internal is not."""
+    d = _memory_dir(scope)
+    if not d:
+        return None
+    fname = _knowledge_filename(name)
+    if not fname:
+        return None
+    d.mkdir(parents=True, exist_ok=True)
+    (d / fname).write_text(content or "", encoding="utf-8")
+    return fname
+
+
+def list_memory(scope: str) -> list[dict]:
+    d = _memory_dir(scope)
+    if not d or not d.exists():
+        return []
+    out: list[dict] = []
+    for p in sorted(d.glob("*.md")):
+        try:
+            st = p.stat()
+            out.append({"name": p.name, "title": p.stem, "bytes": st.st_size,
+                        "modified": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+                        "scope": "public" if (scope or "").lower() == "public" else "internal"})
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
 def _split_markdown(md: str) -> tuple[list[str], list[dict]]:
     """Split a markdown document into sections at each top-level '## ' heading.
     Returns (preamble_lines, [{heading, lines}, ...]). '###' etc. stay inside

@@ -58,33 +58,94 @@ def _terms(text: str) -> list[str]:
     return [w for w in _WORD_RE.findall((text or "").lower()) if w not in _STOP]
 
 
-def retrieve(query: str, k: int = _TOP_K) -> list[dict]:
-    """Top-k vault notes for the question, scored by keyword frequency."""
+def _public_roots() -> list[Path]:
+    """Folders a PATIENT-facing answer may draw on: the knowledge base and the
+    approved public memory ONLY. Client folders and internal memory are excluded
+    by construction, so patient conversations can never surface personal data."""
+    b = _brain_dir()
+    if not b:
+        return []
+    return [p for p in (b / "Knowledge", b / "Memory" / "Public") if p.exists()]
+
+
+def retrieve(query: str, k: int = _TOP_K, audience: str = "internal") -> list[dict]:
+    """
+    Top-k vault notes for the question, scored by keyword frequency.
+
+    audience="internal" (staff, behind login): scans the whole vault — knowledge,
+    memory, AND client/consult notes — so the team can ask about specific clients.
+    audience="public" (patient-facing chat/SMS): scans ONLY the knowledge base and
+    approved public memory, so client data is never reachable.
+    """
     base = _vault_base()
     if not base:
         return []
     terms = set(_terms(query))
     if not terms:
         return []
+    roots = _public_roots() if audience == "public" else [base]
     scored: list[tuple[float, dict]] = []
-    for i, md in enumerate(base.rglob("*.md")):
-        if i >= _MAX_FILES_SCANNED:
-            break
-        try:
-            text = md.read_text(encoding="utf-8")[:_MAX_FILE_CHARS]
-        except Exception:  # noqa: BLE001
-            continue
-        low = text.lower()
-        name_low = md.name.lower()
-        score = 0.0
-        for t in terms:
-            score += low.count(t)
-            if t in name_low:
-                score += 5  # filename matches weigh more
-        if score > 0:
-            scored.append((score, {"path": str(md), "title": md.stem, "text": text}))
+    seen: set[str] = set()
+    scanned = 0
+    for root in roots:
+        for md in root.rglob("*.md"):
+            if scanned >= _MAX_FILES_SCANNED:
+                break
+            rp = str(md)
+            if rp in seen:
+                continue
+            seen.add(rp)
+            scanned += 1
+            try:
+                text = md.read_text(encoding="utf-8")[:_MAX_FILE_CHARS]
+            except Exception:  # noqa: BLE001
+                continue
+            low = text.lower()
+            name_low = md.name.lower()
+            score = 0.0
+            for t in terms:
+                score += low.count(t)
+                if t in name_low:
+                    score += 5  # filename matches weigh more
+            if score > 0:
+                scored.append((score, {"path": rp, "title": md.stem, "text": text}))
     scored.sort(key=lambda s: s[0], reverse=True)
     return [item for _score, item in scored[:k]]
+
+
+# --- PII guard: keep personal data out of public-facing memory ---------------
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_PHONE_RE = re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)")
+# The clinic's own public contacts are NOT personal data — don't flag them.
+_CLINIC_PHONE_DIGITS = {"9026782121", "18884718346", "8884718346"}
+_CLINIC_EMAIL_DOMAIN = "@vmedical.ca"
+
+
+def scan_pii(text: str) -> list[str]:
+    """Return human-readable reasons a piece of text looks like it contains
+    personal client data (so it must not enter public memory). Empty = looks clean."""
+    reasons: list[str] = []
+    t = text or ""
+    for m in _EMAIL_RE.finditer(t):
+        if not m.group().lower().endswith(_CLINIC_EMAIL_DOMAIN):
+            reasons.append("an email address")
+            break
+    for m in _PHONE_RE.finditer(t):
+        digits = re.sub(r"\D", "", m.group())
+        if digits[-10:] not in _CLINIC_PHONE_DIGITS and digits not in _CLINIC_PHONE_DIGITS:
+            reasons.append("a phone number")
+            break
+    try:
+        import db
+        low = t.lower()
+        for p in db.list_patients(limit=3000, include_inactive=True):
+            full = f"{(p.get('first_name') or '').strip()} {(p.get('last_name') or '').strip()}".strip().lower()
+            if len(full) >= 4 and full in low:
+                reasons.append("a patient's name")
+                break
+    except Exception:  # noqa: BLE001
+        pass
+    return reasons
 
 
 def _best_snippet(text: str, query_terms: set[str]) -> str:
@@ -493,7 +554,7 @@ def ask(question: str, history: Optional[list[dict]] = None) -> dict:
         return {"ok": False, "error": "Charlie isn't connected yet "
                 "(set CHARLIE_PROVIDER=ollama, or add an ANTHROPIC_API_KEY)."}
 
-    hits = retrieve(question)
+    hits = retrieve(question, audience="internal")
     context = _build_context(hits, question)
     can_email = config.email_send_enabled()
     can_sms = config.ghl_contacts_enabled()
@@ -612,7 +673,8 @@ def converse(contact_name: Optional[str], history: list[dict], latest_text: str,
                 "(set CHARLIE_PROVIDER=ollama, or add an ANTHROPIC_API_KEY)."}
 
     query = direction or latest_text
-    hits = retrieve(query)
+    # Patient-facing: restrict retrieval to public-safe folders only.
+    hits = retrieve(query, audience="public")
     context = _build_context(hits, query)
 
     messages: list[dict] = []

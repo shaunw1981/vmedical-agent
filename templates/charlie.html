@@ -5,6 +5,9 @@
   <div class="page-head">
     <h1 style="margin:0">Ask {{ charlie_name }}</h1>
     <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      {% if can_review_learnings %}
+      <a class="btn ghost" href="/charlie/learnings">Learning &amp; memory{% if pending_learnings %}
+        <span class="badge">{{ pending_learnings }}</span>{% endif %}</a>{% endif %}
       {% if charlie_enabled %}<a class="btn ghost" href="/charlie/log">Send log</a>{% endif %}
       {% if charlie_enabled and can(user.role, 'manage_settings') %}
       <form method="post" action="/charlie/setup-brain" style="margin:0">
@@ -24,6 +27,30 @@
 
   {% if flash %}
   <div class="banner {{ 'ok' if flash.ok }}">{{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
+  {% endif %}
+
+  {% if charlie_enabled %}
+  <div class="card">
+    <details>
+      <summary style="cursor:pointer;font-weight:600;color:#5E6B51">Teach {{ charlie_name }} something</summary>
+      <p class="muted" style="margin:.4rem 0 .6rem;font-size:.88rem">Correct an answer, or add a fact {{ charlie_name }}
+        should know. It goes to a review queue — a manager approves it before {{ charlie_name }} uses it. Choose
+        <strong>Public</strong> only for things safe to tell patients; anything with a name, email or phone is kept
+        internal automatically.</p>
+      <form method="post" action="/charlie/teach">
+        <textarea name="body" rows="3" required placeholder="e.g. We now offer evening appointments on Thursdays in Summerside."
+          style="width:100%;box-sizing:border-box;padding:.6rem .7rem;border:1px solid var(--line);border-radius:8px;font:inherit"></textarea>
+        <div style="display:flex;gap:.6rem;align-items:center;margin-top:.5rem;flex-wrap:wrap">
+          <label style="font-size:.85rem;display:flex;gap:.3rem;align-items:center">Memory:
+            <select name="scope" style="padding:.35rem .5rem;border:1px solid var(--line);border-radius:6px">
+              <option value="public">Public (patients can see)</option>
+              <option value="internal">Internal (staff only)</option>
+            </select></label>
+          <button class="btn" type="submit">Propose learning</button>
+        </div>
+      </form>
+    </details>
+  </div>
   {% endif %}
 
   {% if not charlie_enabled %}
