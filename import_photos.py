@@ -55,15 +55,56 @@ MAP_FILE = Path("data/photo-import-map.json")
 LEDGER_FILE = Path("data/photo-import-ledger.txt")
 
 # Best-guess starting map (confirmed legs legend). Everything else → REVIEW.
-GUESS_MAP = {
+# Base leg positions (confirmed legend). The normalizer rolls every messy
+# filename variant back to one of these base letters; E/F/G/H… stay as-is and
+# wait for the clinic's face/hand/neckline legend.
+BASE_TO_SLUG = {
     "A": "legs-front",
     "B": "left-leg-side",
     "C": "right-leg-side",
     "D": "legs-back",
 }
 
+# Service / vein / housekeeping tokens that get appended to a position letter in
+# filenames. Longest-first so "RGSVBAA" is stripped before "RGSV"/"BAA".
+_CODE_SUFFIXES = ("RGSVBAA", "DRGSVBAA", "BEVLT", "RGSV", "LGSV", "BGSV", "GSV",
+                  "EVLT", "UGF", "BAA", "EDITED", "COPY", "JPEG", "JPG", "PNG")
+
 _CODE_RE = re.compile(r"^[A-Z0-9&]{2,6}$")        # trailing name-codes like LGSV, EVLT, UGF
-_FILE_RE = re.compile(r"^(\d{4})[ ._-]?(\d{2})[ ._-]?(\d{2})[ ._-]+(.+)$")
+# Date, then an OPTIONAL separator, then the position token. Optional separator
+# recovers names like "2023 03 10A.jpg" (position stuck to the day).
+_FILE_RE = re.compile(r"^(\d{4})[ ._-]?(\d{1,2})[ ._-]?(\d{1,2})[ ._-]*(.+)$")
+
+
+def normalize_code(raw: str) -> str | None:
+    """Reduce a raw filename position token to its base position letter.
+
+    'A2' -> 'A', 'DRGSV' -> 'D', 'PHOTOD' -> 'D', 'C(2)' -> 'C', 'CEDITED' -> 'C',
+    'E3' -> 'E'. Returns None for things that aren't a single position letter
+    (e.g. 'JAMIEROGERS', 'B&C', 'DEMOGRAPHICPIC') so they surface for review.
+    """
+    s = re.sub(r"[^A-Z0-9]", "", (raw or "").upper())
+    if s.startswith("PHOTO"):
+        s = s[5:]
+    changed = True
+    while changed:
+        changed = False
+        for suf in _CODE_SUFFIXES:
+            if s.endswith(suf) and len(s) > len(suf):
+                s = s[: -len(suf)]
+                changed = True
+        s2 = re.sub(r"\d+$", "", s)        # trailing sequence index (A2, D5…)
+        if s2 != s:
+            s, changed = s2, True
+    return s if (len(s) == 1 and s.isalpha()) else None
+
+
+def proposed_target(raw: str) -> str:
+    """What the map template pre-fills for a raw code."""
+    base = normalize_code(raw)
+    if base in BASE_TO_SLUG:
+        return BASE_TO_SLUG[base]
+    return "REVIEW"
 
 
 # --------------------------------------------------------------------------- #
@@ -93,13 +134,13 @@ def parse_photo_file(stem: str) -> tuple[str, str] | None:
         return None
     y, mo, d, rest = m.groups()
     try:
-        datetime(int(y), int(mo), int(d))
+        dt = datetime(int(y), int(mo), int(d))
     except ValueError:
         return None
     code = re.sub(r"\s+", "", rest).upper()
     if not code:
         return None
-    return f"{y}-{mo}-{d}", code
+    return dt.strftime("%Y-%m-%d"), code      # always zero-padded
 
 
 def is_image(p: Path) -> bool:
@@ -196,19 +237,24 @@ def scan(root: Path) -> dict:
 
 
 def write_map_template(code_counts: dict[str, int]) -> None:
+    # Auto-fill every raw code via the normalizer; A/B/C/D variants resolve to a
+    # slug, everything else is left "REVIEW". Kept keyed by RAW code so the map
+    # is fully auditable — you can see exactly what each on-disk token becomes.
     mapping = {}
     for code in sorted(code_counts, key=lambda c: -code_counts[c]):
-        mapping[code] = GUESS_MAP.get(code, "REVIEW")
+        mapping[code] = proposed_target(code)
     doc = {
         "_help": {
-            "each key": "a position code found in your filenames",
+            "each key": "a position code found in your filenames (raw, as on disk)",
             "set each value to": [
                 "a position slug (e.g. legs-front, left-leg-side, right-leg-side, legs-back)",
                 "'headshot'  → use the most recent such photo as the patient's profile photo",
                 "'skip'      → ignore this code",
             ],
+            "already filled": "A/B/C/D and all their variants (A2, DRGSV, PHOTOA…) are set for you.",
+            "you decide": "only the ones still marked REVIEW (new position letters + oddities).",
             "existing slugs": [p["slug"] for p in db.list_photo_positions(active_only=False)],
-            "note": "Any slug you invent (e.g. 'left-hand') is created automatically on commit.",
+            "note": "Any slug you invent (e.g. 'face', 'left-hand') is created automatically on commit.",
         },
         "map": mapping,
         "counts": dict(sorted(code_counts.items(), key=lambda kv: -kv[1])),
@@ -388,12 +434,38 @@ def human_scan_summary(m: dict) -> None:
     print(f"  Did NOT parse:         {t['unparsed_files']} files")
     print(f"  Unsupported (e.g HEIC):{t['unsupported_files']} files")
     print(f"  Unreadable folders:    {t['unreadable_folders']}")
-    print("\n  Position codes found (code: count):")
+
+    # Roll the raw codes up to base positions so the picture is readable.
+    rollup: dict[str, int] = {}
+    variants: dict[str, set] = {}
+    review: dict[str, int] = {}
     for code, n in t["codes"].items():
-        guess = GUESS_MAP.get(code, "??")
-        print(f"      {code:<6} {n:>6}   → guess: {guess}")
+        base = normalize_code(code)
+        if base in BASE_TO_SLUG:
+            rollup[base] = rollup.get(base, 0) + n
+            variants.setdefault(base, set()).add(code)
+        elif base:                       # a clean single letter, but no label yet
+            review[base] = review.get(base, 0) + n
+        else:                            # not a position letter at all
+            review.setdefault("(odd)", 0)
+            review["(odd)"] += n
+    print("\n  Rolled up by position (variants merged):")
+    for base in sorted(rollup):
+        vs = ", ".join(sorted(variants[base]))
+        print(f"      {base} → {BASE_TO_SLUG[base]:<16} {rollup[base]:>6}   [{vs}]")
+    if review:
+        print("\n  NEEDS A DECISION (new position letters + oddities) — set these in the map:")
+        for code in sorted(review, key=lambda c: -review[c]):
+            print(f"      {code:<8} {review[code]:>6}  (likely face / hand / neckline, or junk → skip)")
+
+    sample = [os.path.basename(p) for p in m.get("unparsed_files_sample", [])][:15]
+    if sample:
+        print("\n  Sample of filenames that did NOT parse (paste these to me):")
+        for s in sample:
+            print(f"      {s}")
+
     print(f"\n  Full manifest : {SCAN_FILE}")
-    print(f"  Edit this map : {MAP_FILE}   (set every code, then run --commit)")
+    print(f"  Edit this map : {MAP_FILE}   (REVIEW entries only — A/B/C/D are done)")
 
 
 def main() -> None:
