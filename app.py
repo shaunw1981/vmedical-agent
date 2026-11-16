@@ -51,7 +51,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.32.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.33.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -2416,10 +2416,17 @@ def patient_detail(request: Request, patient_id: int):
     if not patient:
         return templates.TemplateResponse("403.html", _ctx(request, user), status_code=404)
     photos_rows = db.list_patient_photos(patient_id)
-    # Group by position, newest first within each.
+    # Group by position; within each, order strictly by capture date so the row
+    # reads as a timeline (oldest → newest), regardless of import order.
     by_pos: dict = {}
     for ph in photos_rows:
         by_pos.setdefault(ph.get("position_name") or "Other", []).append(ph)
+    for shots in by_pos.values():
+        shots.sort(key=lambda p: (p.get("created_at") or "", p.get("id") or 0))
+    # Show positions in the clinic's canonical order (front, sides, back, …).
+    _pos_order = {p["name"]: p.get("sort_order", 999)
+                  for p in db.list_photo_positions(active_only=False)}
+    by_pos = dict(sorted(by_pos.items(), key=lambda kv: (_pos_order.get(kv[0], 999), kv[0])))
 
     notes = db.list_patient_notes(patient_id)
     treatments = db.list_patient_treatments(patient_id)
