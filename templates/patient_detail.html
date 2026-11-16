@@ -153,34 +153,48 @@
     {% if photo_count == 0 %}
       <p class="muted" style="margin:.8rem 0 0">No photos yet.{% if can_photos %} Tap “Add photos” to start a baseline set.{% endif %}</p>
     {% else %}
-      {% for position, shots in photos_by_position.items() %}
-      <div class="ph-pos">
-        <div class="ph-pos-head">{{ position }} <span class="muted" style="font-weight:400">· {{ shots|length }} over time</span></div>
-        <div class="ph-strip">
-          {% for ph in shots %}
-          <figure class="ph-card">
-            <a href="/photos/file/{{ ph.id }}" target="_blank" rel="noopener">
-              <img src="/photos/thumb/{{ ph.id }}" alt="{{ position }} on {{ ph.created_at }}" loading="lazy">
-            </a>
-            <figcaption>
-              <div class="ph-date">{{ ph.created_at[:10] }}</div>
-              {% if ph.framing_score is not none %}
-                <div class="ph-score {{ 'good' if ph.framing_score >= 85 else ('mid' if ph.framing_score >= 70 else 'low') }}"
-                     title="{{ ph.framing_note }}">framing {{ ph.framing_score }}%</div>
-              {% endif %}
-              <div class="ph-actions">
-                <a href="/photos/orig/{{ ph.id }}" title="Download original">⬇</a>
-                <form method="post" action="/photos/{{ ph.id }}/delete?back=/patients/{{ patient.id }}"
-                      onsubmit="return confirm('Delete this photo permanently?')">
-                  <button type="submit" title="Delete">🗑</button>
-                </form>
-              </div>
-            </figcaption>
-          </figure>
-          {% endfor %}
-        </div>
+      <p class="muted" style="margin:.2rem 0 .7rem;font-size:.82rem">Each row is a visit — scan an angle down the column to see progress over time.</p>
+      <div class="pg-wrap">
+        <table class="pg">
+          <thead>
+            <tr>
+              <th class="pg-corner">Date</th>
+              {% for position in photo_positions %}<th>{{ position }}</th>{% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in photo_rows %}
+            <tr>
+              <th class="pg-date">{{ row.date }}</th>
+              {% for cell in row.cells %}
+              <td>
+                {% for ph in cell %}
+                <figure class="ph-card">
+                  <a href="/photos/file/{{ ph.id }}" target="_blank" rel="noopener">
+                    <img src="/photos/thumb/{{ ph.id }}" alt="{{ photo_positions[loop.index0] }} on {{ ph.created_at[:10] }}" loading="lazy">
+                  </a>
+                  {% if ph.framing_score is not none %}
+                    <span class="ph-score {{ 'good' if ph.framing_score >= 85 else ('mid' if ph.framing_score >= 70 else 'low') }}"
+                          title="{{ ph.framing_note }}">{{ ph.framing_score }}%</span>
+                  {% endif %}
+                  <div class="ph-actions">
+                    <a href="/photos/orig/{{ ph.id }}" title="Download original">⬇</a>
+                    <form method="post" action="/photos/{{ ph.id }}/delete?back=/patients/{{ patient.id }}"
+                          onsubmit="return confirm('Delete this photo permanently?')">
+                      <button type="submit" title="Delete">🗑</button>
+                    </form>
+                  </div>
+                </figure>
+                {% else %}
+                <span class="pg-empty" title="No photo for this angle on this date">—</span>
+                {% endfor %}
+              </td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
-      {% endfor %}
     {% endif %}
   </div>
 
@@ -232,22 +246,28 @@
     .pt-form .field > span{ font-size:.8rem; font-weight:600; color:var(--muted); }
     .pt-form input, .pt-form textarea{ width:100%; box-sizing:border-box; padding:.55rem .7rem;
       border:1px solid var(--line); border-radius:8px; background:var(--surface,#fff); color:inherit; font-size:.95rem; }
-    .ph-pos{ margin-top:1rem; border-top:1px solid var(--line); padding-top:.7rem; }
-    .ph-pos:first-of-type{ border-top:0; }
-    .ph-pos-head{ font-weight:700; color:#2A2B27; margin-bottom:.5rem; display:flex;
-      align-items:baseline; gap:.5rem; }
-    .ph-strip{ display:flex; flex-direction:row; flex-wrap:nowrap; gap:.6rem; overflow-x:auto;
-      padding-bottom:.5rem; scroll-snap-type:x proximity; }
-    .ph-card{ margin:0; flex:0 0 auto; width:116px; scroll-snap-align:start; }
-    .ph-card img{ width:116px; height:155px; object-fit:cover; border-radius:9px; border:1px solid var(--line); background:#f3f1ec; display:block; }
-    .ph-card figcaption{ margin-top:.25rem; }
-    .ph-date{ font-size:.75rem; color:var(--muted); font-weight:600; }
-    .ph-score{ font-size:.72rem; font-weight:700; margin-top:.15rem; display:inline-block; padding:.05rem .35rem; border-radius:999px; }
+    /* progress-photo visit grid: rows = dates, columns = angles */
+    .pg-wrap{ overflow-x:auto; margin-top:.3rem; }
+    .pg{ border-collapse:separate; border-spacing:.55rem; }
+    .pg th{ font-size:.78rem; color:var(--muted); font-weight:700; text-align:center; padding:.1rem .2rem; }
+    .pg thead th{ position:sticky; top:0; background:var(--surface,#fff); z-index:2; white-space:nowrap; }
+    .pg .pg-corner{ left:0; z-index:3; position:sticky; }
+    .pg .pg-date{ position:sticky; left:0; background:var(--surface,#fff); z-index:1;
+      font-weight:700; color:#2A2B27; white-space:nowrap; vertical-align:middle; text-align:left;
+      padding-right:.4rem; }
+    .pg td{ vertical-align:top; text-align:center; }
+    .ph-card{ margin:0; position:relative; width:112px; }
+    .ph-card img{ width:112px; height:150px; object-fit:cover; border-radius:9px;
+      border:1px solid var(--line); background:#f3f1ec; display:block; }
+    .pg-empty{ display:inline-flex; align-items:center; justify-content:center; width:112px;
+      height:150px; border:1px dashed var(--line); border-radius:9px; color:var(--line); font-size:1.2rem; }
+    .ph-score{ position:absolute; top:5px; right:5px; font-size:.68rem; font-weight:700;
+      padding:.05rem .3rem; border-radius:999px; box-shadow:0 1px 3px rgba(0,0,0,.18); }
     .ph-score.good{ background:#e4ecd9; color:#4e5944; }
     .ph-score.mid{ background:#fbf0d6; color:#8a6d1f; }
     .ph-score.low{ background:#fbe0da; color:#8a2c20; }
-    .ph-actions{ display:flex; gap:.5rem; align-items:center; margin-top:.25rem; }
-    .ph-actions a, .ph-actions button{ background:none; border:0; cursor:pointer; font-size:.95rem; text-decoration:none; color:var(--muted); padding:0; }
+    .ph-actions{ display:flex; gap:.6rem; align-items:center; justify-content:center; margin-top:.2rem; }
+    .ph-actions a, .ph-actions button{ background:none; border:0; cursor:pointer; font-size:.9rem; text-decoration:none; color:var(--muted); padding:0; }
     .ph-actions form{ display:inline; }
   </style>
 {% endblock %}

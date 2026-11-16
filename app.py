@@ -51,7 +51,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.33.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.34.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -2416,17 +2416,24 @@ def patient_detail(request: Request, patient_id: int):
     if not patient:
         return templates.TemplateResponse("403.html", _ctx(request, user), status_code=404)
     photos_rows = db.list_patient_photos(patient_id)
-    # Group by position; within each, order strictly by capture date so the row
-    # reads as a timeline (oldest → newest), regardless of import order.
-    by_pos: dict = {}
-    for ph in photos_rows:
-        by_pos.setdefault(ph.get("position_name") or "Other", []).append(ph)
-    for shots in by_pos.values():
-        shots.sort(key=lambda p: (p.get("created_at") or "", p.get("id") or 0))
-    # Show positions in the clinic's canonical order (front, sides, back, …).
+    # Pivot into a visit grid: one row per date, each angle shown across that row.
     _pos_order = {p["name"]: p.get("sort_order", 999)
                   for p in db.list_photo_positions(active_only=False)}
-    by_pos = dict(sorted(by_pos.items(), key=lambda kv: (_pos_order.get(kv[0], 999), kv[0])))
+    pos_positions = sorted({ph.get("position_name") or "Other" for ph in photos_rows},
+                           key=lambda n: (_pos_order.get(n, 999), n))
+    _grid: dict = {}
+    for ph in photos_rows:
+        day = (ph.get("created_at") or "")[:10]
+        _grid.setdefault(day, {}).setdefault(ph.get("position_name") or "Other", []).append(ph)
+    # Newest visit at the top; within a cell, oldest → newest.
+    photo_rows = []
+    for day in sorted(_grid, reverse=True):
+        cells = []
+        for pos in pos_positions:
+            shots = sorted(_grid[day].get(pos, []),
+                           key=lambda p: (p.get("created_at") or "", p.get("id") or 0))
+            cells.append(shots)
+        photo_rows.append({"date": day, "cells": cells})
 
     notes = db.list_patient_notes(patient_id)
     treatments = db.list_patient_treatments(patient_id)
@@ -2446,7 +2453,8 @@ def patient_detail(request: Request, patient_id: int):
     return templates.TemplateResponse(
         "patient_detail.html",
         _ctx(request, user, patient=patient, label=_patient_label(patient),
-             photos_by_position=by_pos, photo_count=len(photos_rows),
+             photo_positions=pos_positions, photo_rows=photo_rows,
+             photo_count=len(photos_rows),
              timeline=timeline, documents=documents,
              can_photos=config.can(user["role"], "manage_photos"),
              flash=request.session.pop("patients_flash", None)),
