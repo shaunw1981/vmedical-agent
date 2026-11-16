@@ -58,7 +58,11 @@
     <div class="pt-list">
       {% for p in patients %}
       <a class="pt-row" href="/patients/{{ p.id }}">
-        <div class="pt-avatar">{{ (p.first_name or p.last_name or '?')[0]|upper }}</div>
+        {% if p.headshot_thumb %}
+          <img class="pt-avatar pt-avatar-img" src="/patients/{{ p.id }}/headshot?v={{ p.updated_at }}" alt="" loading="lazy">
+        {% else %}
+          <div class="pt-avatar">{{ (p.first_name or p.last_name or '?')[0]|upper }}</div>
+        {% endif %}
         <div class="pt-main">
           <div class="pt-name">{{ (p.first_name ~ ' ' ~ p.last_name)|trim or ('Patient #' ~ p.id) }}</div>
           <div class="pt-sub muted">{{ p.email or '' }}{% if p.email and p.phone %} · {% endif %}{{ p.phone or '' }}</div>
@@ -85,6 +89,7 @@
     .pt-row:hover{ background:#faf9f6; }
     .pt-avatar{ width:38px; height:38px; border-radius:50%; background:#7D8B6E; color:#fff; font-weight:700;
       display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+    .pt-avatar-img{ object-fit:cover; }
     .pt-name{ font-weight:600; }
     .pt-sub{ font-size:.82rem; }
   </style>

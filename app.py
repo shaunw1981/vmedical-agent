@@ -51,7 +51,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.31.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.32.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -2549,6 +2549,59 @@ def patient_delete_document(request: Request, patient_id: int, doc_id: int):
         db.delete_patient_document(doc_id)
         request.session["patients_flash"] = {"ok": True, "msg": "Document deleted."}
     return RedirectResponse(f"/patients/{patient_id}#documents", status_code=303)
+
+
+@app.get("/patients/{patient_id}/headshot")
+def patient_headshot(request: Request, patient_id: int):
+    """Serve the patient's profile headshot (square avatar by default, ?full=1
+    for the larger portrait)."""
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    patient = db.get_patient(patient_id)
+    if not patient:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    full = (request.query_params.get("full") or "") in ("1", "true", "yes")
+    rel = (patient.get("headshot_path") if full else patient.get("headshot_thumb")) \
+        or patient.get("headshot_path")
+    if not rel:
+        return JSONResponse({"error": "no headshot"}, status_code=404)
+    return _photo_file_response(rel)
+
+
+@app.post("/patients/{patient_id}/headshot")
+async def patient_set_headshot(request: Request, patient_id: int,
+                               headshot: UploadFile = File(...)):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    patient = db.get_patient(patient_id)
+    if not patient:
+        return JSONResponse({"error": "unknown patient"}, status_code=404)
+    data = await headshot.read()
+    if not data:
+        request.session["patients_flash"] = {"ok": False, "msg": "No image received."}
+        return RedirectResponse(f"/patients/{patient_id}", status_code=303)
+    try:
+        saved = photos_svc.store_headshot(patient, data)
+        db.set_patient_headshot(patient_id, saved["headshot_path"], saved["thumb_path"])
+        request.session["patients_flash"] = {"ok": True, "msg": "Headshot updated."}
+    except Exception as exc:  # noqa: BLE001
+        request.session["patients_flash"] = {"ok": False, "msg": f"Couldn't save headshot: {exc}"}
+    return RedirectResponse(f"/patients/{patient_id}", status_code=303)
+
+
+@app.post("/patients/{patient_id}/headshot/delete")
+def patient_delete_headshot(request: Request, patient_id: int):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    patient = db.get_patient(patient_id)
+    if patient:
+        photos_svc.delete_files(patient.get("headshot_path"), patient.get("headshot_thumb"))
+        db.set_patient_headshot(patient_id, "", "")
+        request.session["patients_flash"] = {"ok": True, "msg": "Headshot removed."}
+    return RedirectResponse(f"/patients/{patient_id}", status_code=303)
 
 
 @app.post("/patients/{patient_id}/edit")

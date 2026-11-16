@@ -3,7 +3,30 @@
 {% block nav %}patients{% endblock %}
 {% block content %}
   <div class="page-head" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
-    <h1 style="margin:0"><a href="/patients" class="muted" style="text-decoration:none">Patients</a> › {{ label }}</h1>
+    <div style="display:flex;align-items:center;gap:.9rem;min-width:0">
+      <details class="hs-edit">
+        <summary title="Set or change headshot">
+          {% if patient.headshot_thumb %}
+            <img class="hs-img" src="/patients/{{ patient.id }}/headshot?v={{ patient.updated_at }}" alt="Headshot of {{ label }}">
+          {% else %}
+            <span class="hs-img hs-placeholder">{{ (patient.first_name or patient.last_name or '?')[0]|upper }}</span>
+          {% endif %}
+          <span class="hs-cam" aria-hidden="true">📷</span>
+        </summary>
+        <form method="post" action="/patients/{{ patient.id }}/headshot" enctype="multipart/form-data" class="hs-form">
+          <div class="muted" style="font-size:.78rem;margin-bottom:.3rem">Profile headshot (stays on this Mac)</div>
+          <input type="file" name="headshot" accept="image/*" required>
+          <div style="margin-top:.5rem;display:flex;gap:.5rem">
+            <button class="btn" type="submit">Save headshot</button>
+            {% if patient.headshot_thumb %}
+            <button class="btn ghost" type="submit" formaction="/patients/{{ patient.id }}/headshot/delete" formnovalidate
+                    onclick="return confirm('Remove this headshot?')">Remove</button>
+            {% endif %}
+          </div>
+        </form>
+      </details>
+      <h1 style="margin:0;min-width:0"><a href="/patients" class="muted" style="text-decoration:none">Patients</a> › {{ label }}</h1>
+    </div>
     <div style="display:flex;gap:.5rem;flex-wrap:wrap">
       {% if patient.ghl_contact_id %}<a class="btn ghost" href="/clients/{{ patient.ghl_contact_id }}">View in Contacts</a>{% endif %}
       {% if can_photos %}<a class="btn" href="/photos?patient_id={{ patient.id }}">Take progress photos</a>{% endif %}
@@ -162,6 +185,18 @@
   </div>
 
   <style>
+    /* headshot */
+    .hs-edit{ position:relative; flex:0 0 auto; }
+    .hs-edit > summary{ list-style:none; cursor:pointer; position:relative; display:inline-block; }
+    .hs-edit > summary::-webkit-details-marker{ display:none; }
+    .hs-img{ width:60px; height:60px; border-radius:50%; object-fit:cover; display:flex;
+      align-items:center; justify-content:center; border:2px solid #fff; box-shadow:0 0 0 1px var(--line);
+      background:#7D8B6E; color:#fff; font-weight:700; font-size:1.4rem; }
+    .hs-cam{ position:absolute; right:-2px; bottom:-2px; background:#fff; border:1px solid var(--line);
+      border-radius:50%; width:22px; height:22px; display:flex; align-items:center; justify-content:center;
+      font-size:.7rem; }
+    .hs-form{ position:absolute; z-index:20; top:70px; left:0; width:260px; background:var(--surface,#fff);
+      border:1px solid var(--line); border-radius:10px; padding:.7rem .8rem; box-shadow:0 8px 24px rgba(0,0,0,.12); }
     .pd-h2{ font-size:1.05rem; margin:0 0 .6rem; color:#5E6B51; }
     .pd-quick{ display:grid; grid-template-columns:1fr 1fr; gap:1.1rem; }
     .pd-quick .card{ margin-bottom:1.1rem; }

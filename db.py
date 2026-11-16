@@ -222,7 +222,9 @@ def init_db() -> None:
                 notes           TEXT,
                 ghl_contact_id  TEXT,            -- optional link to the GHL contact
                 active          INTEGER NOT NULL DEFAULT 1,
-                created_by      TEXT
+                created_by      TEXT,
+                headshot_path   TEXT,            -- profile/ID headshot (full), local path
+                headshot_thumb  TEXT             -- small round avatar thumbnail
             );
 
             -- The photo positions/poses the team can choose from (managed in
@@ -255,7 +257,8 @@ def init_db() -> None:
                 height         INTEGER,
                 framing_score  INTEGER,         -- 0-100 similarity to the previous same-position shot
                 framing_note   TEXT,
-                taken_by       TEXT
+                taken_by       TEXT,
+                source         TEXT NOT NULL DEFAULT 'capture'  -- 'capture'|'import'
             );
 
             -- Clinical notes on a patient (local).
@@ -337,6 +340,15 @@ def init_db() -> None:
             conn.execute("ALTER TABLE web_messages ADD COLUMN ghl_contact_id TEXT")
         if web_cols and "reply_text" not in web_cols:
             conn.execute("ALTER TABLE web_messages ADD COLUMN reply_text TEXT")
+        patient_cols = {row["name"] for row in conn.execute("PRAGMA table_info(patients)")}
+        if patient_cols and "headshot_path" not in patient_cols:
+            conn.execute("ALTER TABLE patients ADD COLUMN headshot_path TEXT")
+        if patient_cols and "headshot_thumb" not in patient_cols:
+            conn.execute("ALTER TABLE patients ADD COLUMN headshot_thumb TEXT")
+        photo_cols = {row["name"] for row in conn.execute("PRAGMA table_info(patient_photos)")}
+        if photo_cols and "source" not in photo_cols:
+            # 'capture' (taken in-app) vs 'import' (bulk-imported from the archive)
+            conn.execute("ALTER TABLE patient_photos ADD COLUMN source TEXT NOT NULL DEFAULT 'capture'")
 
         # Seed the default photo positions once (if the table is empty). Order
         # matches the clinic's reference poses: A=front, B/C=side, D=back.
@@ -746,6 +758,31 @@ def update_patient(patient_id: int, **fields) -> None:
         conn.execute(f"UPDATE patients SET {cols} WHERE id = ?", (*sets.values(), patient_id))
 
 
+def set_patient_headshot(patient_id: int, headshot_path: str, headshot_thumb: str) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE patients SET headshot_path = ?, headshot_thumb = ?, updated_at = ? WHERE id = ?",
+            (headshot_path or None, headshot_thumb or None, now, patient_id),
+        )
+
+
+def find_patient_by_name(first_name: str, last_name: str) -> Optional[dict]:
+    """Exact (case-insensitive) match on first+last — used to avoid duplicating
+    patients during the photo import. Prefers an active record."""
+    first = (first_name or "").strip()
+    last = (last_name or "").strip()
+    if not last and not first:
+        return None
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM patients WHERE LOWER(TRIM(first_name)) = LOWER(?) "
+            "AND LOWER(TRIM(last_name)) = LOWER(?) ORDER BY active DESC, id ASC",
+            (first, last),
+        ).fetchall()
+        return dict(rows[0]) if rows else None
+
+
 def search_patients(q: str, limit: int = 20, include_inactive: bool = False) -> list[dict]:
     """Search local patients by name / email / phone."""
     q = (q or "").strip()
@@ -832,14 +869,20 @@ def delete_photo_position(position_id: int) -> None:
 def add_patient_photo(patient_id: int, position_id: Optional[int], position_name: str,
                       orig_path: str, std_path: str, thumb_path: str,
                       width: int, height: int, framing_score: Optional[int],
-                      framing_note: str, taken_by: str) -> int:
+                      framing_note: str, taken_by: str,
+                      created_at: str = "", source: str = "capture") -> int:
+    # created_at carries the real capture date for imported photos (so the
+    # timeline and "most recent = baseline" reflect when the shot was taken,
+    # not when it was imported). Defaults to now for in-app captures.
+    created_at = (created_at or "").strip() or datetime.now().isoformat(timespec="seconds")
     with _connect() as conn:
         cur = conn.execute(
             "INSERT INTO patient_photos (created_at, patient_id, position_id, position_name, "
-            "orig_path, std_path, thumb_path, width, height, framing_score, framing_note, taken_by) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (datetime.now().isoformat(timespec="seconds"), patient_id, position_id, position_name,
-             orig_path, std_path, thumb_path, width, height, framing_score, framing_note, taken_by),
+            "orig_path, std_path, thumb_path, width, height, framing_score, framing_note, "
+            "taken_by, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (created_at, patient_id, position_id, position_name,
+             orig_path, std_path, thumb_path, width, height, framing_score, framing_note,
+             taken_by, source or "capture"),
         )
         return int(cur.lastrowid)
 

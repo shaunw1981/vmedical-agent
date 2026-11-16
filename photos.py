@@ -94,10 +94,14 @@ def _framing_score(prev_std_abs: Optional[Path], std_img: Image.Image) -> tuple[
 
 
 def store(patient: dict, position: dict, image_bytes: bytes, taken_by: str = "",
-          prev_std_rel: Optional[str] = None) -> dict:
+          prev_std_rel: Optional[str] = None, taken_at: Optional[datetime] = None) -> dict:
     """
     Process and save one photo. Returns a metadata dict with RELATIVE paths
     (relative to the photo root) plus dimensions and a framing score.
+
+    taken_at: the real capture date/time. For in-app captures leave it None
+    (now() is used). For bulk-imported archive photos pass the date parsed from
+    the filename so the on-disk filename reflects when the shot was taken.
     """
     aspect_w = int(position.get("aspect_w") or 3)
     aspect_h = int(position.get("aspect_h") or 4)
@@ -120,7 +124,14 @@ def store(patient: dict, position: dict, image_bytes: bytes, taken_by: str = "",
     folder_rel = f"{patient_folder_name(patient)}/{pos_slug}"
     folder_abs = root() / folder_rel
     folder_abs.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = (taken_at or datetime.now()).strftime("%Y%m%d-%H%M%S")
+    # Guard against two photos sharing a stamp (same capture date on import).
+    base = stamp
+    i = 2
+    while (folder_abs / f"{base}.jpg").exists():
+        base = f"{stamp}-{i}"
+        i += 1
+    stamp = base
 
     orig_rel = f"{folder_rel}/{stamp}-orig.jpg"
     std_rel = f"{folder_rel}/{stamp}.jpg"
@@ -138,6 +149,36 @@ def store(patient: dict, position: dict, image_bytes: bytes, taken_by: str = "",
         "orig_path": orig_rel, "std_path": std_rel, "thumb_path": thumb_rel,
         "width": w, "height": h, "framing_score": score, "framing_note": note,
     }
+
+
+_HEADSHOT_LONG_EDGE = 900   # px
+_HEADSHOT_THUMB = 240       # px (square avatar)
+
+
+def store_headshot(patient: dict, image_bytes: bytes) -> dict:
+    """
+    Save a profile headshot for the patient: a full portrait (4:5) plus a square
+    avatar thumbnail. Overwrites any previous headshot for this patient. Returns
+    {headshot_path, thumb_path} as RELATIVE paths. Stays entirely on the Mac.
+    """
+    img = Image.open(io.BytesIO(image_bytes))
+    img = ImageOps.exif_transpose(img)
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+
+    full = _cover_crop(img, 4, 5)
+    full.thumbnail((_HEADSHOT_LONG_EDGE, _HEADSHOT_LONG_EDGE), Image.LANCZOS)
+
+    square = _cover_crop(img, 1, 1)
+    square.thumbnail((_HEADSHOT_THUMB, _HEADSHOT_THUMB), Image.LANCZOS)
+
+    folder_rel = patient_folder_name(patient)
+    (root() / folder_rel).mkdir(parents=True, exist_ok=True)
+    full_rel = f"{folder_rel}/headshot.jpg"
+    thumb_rel = f"{folder_rel}/headshot-thumb.jpg"
+    full.convert("RGB").save(root() / full_rel, "JPEG", quality=88)
+    square.convert("RGB").save(root() / thumb_rel, "JPEG", quality=84)
+    return {"headshot_path": full_rel, "thumb_path": thumb_rel}
 
 
 def store_document(patient: dict, data: bytes, filename: str) -> dict:
