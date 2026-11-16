@@ -190,7 +190,11 @@ def scan(root: Path) -> dict:
         rec["folders"].add(folder)
         parsed = parse_photo_file(path.stem)
         if not parsed:
+            # An image in a patient folder with no parseable date — almost always
+            # a headshot named by the person (e.g. "Douglas.jpg"). We know whose
+            # it is from the folder, so it's recoverable, not lost.
             unparsed_files.append(str(path))
+            rec["undated"] = rec.get("undated", 0) + 1
             continue
         _date, code = parsed
         rec["photo_count"] += 1
@@ -214,7 +218,8 @@ def scan(root: Path) -> dict:
             "patients_new": len(patients) - existing,
             "photos_parsed": sum(r["photo_count"] for r in patients.values()),
             "codes": dict(sorted(code_counts.items(), key=lambda kv: -kv[1])),
-            "unparsed_files": len(unparsed_files),
+            "undated_images": len(unparsed_files),
+            "patients_with_undated": sum(1 for r in patients.values() if r.get("undated")),
             "unsupported_files": len(unsupported),
             "unreadable_folders": len(bad_folders),
         },
@@ -222,6 +227,7 @@ def scan(root: Path) -> dict:
             {
                 "first_name": r["first_name"], "last_name": r["last_name"],
                 "photo_count": r["photo_count"],
+                "undated": r.get("undated", 0),
                 "codes": dict(r["codes"]),
                 "folders": sorted(r["folders"]),
                 "matches_patient_id": r["match_id"],
@@ -243,6 +249,8 @@ def write_map_template(code_counts: dict[str, int]) -> None:
     mapping = {}
     for code in sorted(code_counts, key=lambda c: -code_counts[c]):
         mapping[code] = proposed_target(code)
+    # Undated images in a patient folder (named by the person) → headshot.
+    mapping["__undated__"] = "headshot"
     doc = {
         "_help": {
             "each key": "a position code found in your filenames (raw, as on disk)",
@@ -253,6 +261,10 @@ def write_map_template(code_counts: dict[str, int]) -> None:
             ],
             "already filled": "A/B/C/D and all their variants (A2, DRGSV, PHOTOA…) are set for you.",
             "you decide": "only the ones still marked REVIEW (new position letters + oddities).",
+            "__undated__": "special: undated images named by the person (headshots). "
+                           "'headshot' sets the best one as the profile photo.",
+            "REVIEW means": "no decision yet — commit SKIPS these (loudly) so you can run now "
+                            "and re-run later once labelled; nothing is lost.",
             "existing slugs": [p["slug"] for p in db.list_photo_positions(active_only=False)],
             "note": "Any slug you invent (e.g. 'face', 'left-hand') is created automatically on commit.",
         },
@@ -279,6 +291,31 @@ def append_ledger(fh, rel: str) -> None:
 
 def slug_to_name(slug: str) -> str:
     return slug.replace("-", " ").title()
+
+
+def _safe_mtime(p) -> float:
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _choose_undated(paths: list, first: str, last: str):
+    """Pick the best headshot among a patient's undated images: prefer a file
+    whose name contains the patient's first or last name; otherwise the most
+    recently modified (their most current look)."""
+    first_l, last_l = (first or "").lower(), (last or "").lower()
+
+    def score(p) -> tuple:
+        stem = p.stem.lower()
+        named = (first_l and first_l in stem) or (last_l and last_l in stem)
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        return (1 if named else 0, mtime)
+
+    return max(paths, key=score)
 
 
 def resolve_positions(mapping: dict[str, str]) -> dict[str, dict]:
@@ -309,17 +346,19 @@ def commit(root: Path, mapping: dict[str, str], only: str, limit: int, created_b
     manifest = scan(root)
     code_counts = manifest["totals"]["codes"]
 
-    # Every code present must have a decision.
-    missing = [c for c in code_counts if c not in mapping or
-               (mapping[c] or "").strip().lower() in ("", "review")]
-    if missing:
-        print("STOP — these codes have no decision in the map (edit "
-              f"{MAP_FILE} and set each to a slug / 'headshot' / 'skip'):")
-        for c in missing:
-            print(f"    {c}   ({code_counts[c]} files)")
-        sys.exit(2)
+    # Codes with no decision yet (REVIEW / blank / absent) are SKIPPED — loudly —
+    # not fatal. The import is idempotent, so you can label them later and re-run
+    # to add just those. Nothing is lost.
+    undecided = [c for c in code_counts if c not in mapping or
+                 (mapping[c] or "").strip().lower() in ("", "review")]
+    if undecided:
+        print("NOTE — these codes have no decision yet and will be SKIPPED this run")
+        print("       (set them in the map and re-run to add them; nothing is lost):")
+        for c in sorted(undecided, key=lambda c: -code_counts[c]):
+            print(f"       {c:<8} {code_counts[c]:>5} files")
+        print()
 
-    resolved = resolve_positions(mapping)
+    resolved = resolve_positions(mapping)   # includes the "__undated__" decision
     ledger = load_ledger()
 
     # Re-group archive files by parsed patient, keeping full paths.
@@ -329,10 +368,13 @@ def commit(root: Path, mapping: dict[str, str], only: str, limit: int, created_b
         if not last and not first:
             continue
         key = (last.lower(), first.lower())
-        rec = by_patient.setdefault(key, {"first_name": first, "last_name": last, "files": []})
+        rec = by_patient.setdefault(key, {"first_name": first, "last_name": last,
+                                          "files": [], "undated": []})
         parsed = parse_photo_file(path.stem)
         if parsed:
             rec["files"].append((parsed[0], parsed[1], path))   # (iso_date, code, path)
+        else:
+            rec["undated"].append(path)                         # headshot candidate
 
     keys = sorted(by_patient, key=lambda k: (k[0], k[1]))
     if only:
@@ -359,7 +401,8 @@ def commit(root: Path, mapping: dict[str, str], only: str, limit: int, created_b
                 patient = db.get_patient(pid)
                 stats["patients_created"] += 1
             label = f"{rec['first_name']} {rec['last_name']}".strip()
-            print(f"• {label}  ({len(rec['files'])} files)")
+            extra = f" + {len(rec['undated'])} undated" if rec["undated"] else ""
+            print(f"• {label}  ({len(rec['files'])} dated{extra})")
 
             # Group this patient's files by code.
             by_code: dict[str, list] = defaultdict(list)
@@ -417,6 +460,47 @@ def commit(root: Path, mapping: dict[str, str], only: str, limit: int, created_b
                         print(f"    ! photo failed ({path.name}): {exc}")
                         stats["errors"] += 1
 
+            # Undated images (named by the person) → profile headshot, or a
+            # position if the map says so; '__undated__' decides.
+            und = resolved.get("__undated__", {"kind": "skip"})
+            if rec["undated"] and und["kind"] == "headshot":
+                cand = _choose_undated(rec["undated"], rec["first_name"], rec["last_name"])
+                rel = str(cand)
+                if rel in ledger:
+                    stats["skipped_existing"] += 1
+                else:
+                    try:
+                        saved = photos_svc.store_headshot(patient, cand.read_bytes())
+                        db.set_patient_headshot(patient["id"], saved["headshot_path"],
+                                                saved["thumb_path"])
+                        append_ledger(led, rel)
+                        stats["headshots"] += 1
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"    ! headshot failed ({cand.name}): {exc}")
+                        stats["errors"] += 1
+            elif rec["undated"] and und["kind"] == "position":
+                position = und["position"]
+                for p in sorted(rec["undated"], key=lambda x: _safe_mtime(x)):
+                    rel = str(p)
+                    if rel in ledger:
+                        stats["skipped_existing"] += 1
+                        continue
+                    try:
+                        when = datetime.fromtimestamp(_safe_mtime(p))
+                        meta = photos_svc.store(patient, position, p.read_bytes(),
+                                                taken_by=created_by, taken_at=when)
+                        db.add_patient_photo(
+                            patient["id"], position["id"], position["name"],
+                            meta["orig_path"], meta["std_path"], meta["thumb_path"],
+                            meta["width"], meta["height"], meta["framing_score"],
+                            meta["framing_note"], created_by,
+                            created_at=when.isoformat(timespec="seconds"), source="import")
+                        append_ledger(led, rel)
+                        stats["photos"] += 1
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"    ! photo failed ({p.name}): {exc}")
+                        stats["errors"] += 1
+
     print("\n=== Import complete ===")
     for k, v in stats.items():
         print(f"  {k.replace('_',' ')}: {v}")
@@ -430,8 +514,9 @@ def human_scan_summary(m: dict) -> None:
     print(f"\nArchive: {m['root']}")
     print(f"  Patients found:        {t['patients']}  "
           f"({t['patients_matching_existing']} match existing, {t['patients_new']} new)")
-    print(f"  Photos that parsed:    {t['photos_parsed']}")
-    print(f"  Did NOT parse:         {t['unparsed_files']} files")
+    print(f"  Dated photos parsed:   {t['photos_parsed']}")
+    print(f"  Undated images:        {t['undated_images']} "
+          f"(in {t['patients_with_undated']} patient folders → headshots)")
     print(f"  Unsupported (e.g HEIC):{t['unsupported_files']} files")
     print(f"  Unreadable folders:    {t['unreadable_folders']}")
 
@@ -460,7 +545,7 @@ def human_scan_summary(m: dict) -> None:
 
     sample = [os.path.basename(p) for p in m.get("unparsed_files_sample", [])][:15]
     if sample:
-        print("\n  Sample of filenames that did NOT parse (paste these to me):")
+        print("\n  Sample of UNDATED images (treated as headshots):")
         for s in sample:
             print(f"      {s}")
 
