@@ -554,6 +554,12 @@ def human_scan_summary(m: dict) -> None:
 
 
 def main() -> None:
+    # Stream progress line-by-line even when stdout is redirected to a log file,
+    # so `tail -f import.log` shows live progress instead of buffered chunks.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
     ap = argparse.ArgumentParser(description="Review-first import of the CLIENT PHOTOS archive.")
     ap.add_argument("--root", default=str(DEFAULT_ROOT), help="Path to the CLIENT PHOTOS folder.")
     ap.add_argument("--scan", action="store_true", help="Discover structure only (default).")
