@@ -20,7 +20,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PIL import Image, ImageChops, ImageOps, ImageStat
+from PIL import Image, ImageChops, ImageFile, ImageOps, ImageStat
+
+# Tolerate images that are slightly truncated (a few bytes missing off the end,
+# common in older/partially-copied archives) instead of refusing them outright.
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 import config
 
