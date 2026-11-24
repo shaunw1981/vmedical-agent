@@ -174,7 +174,20 @@ def init_db() -> None:
                 dedupe_key    TEXT UNIQUE,     -- so a retry/double-submit is ignored
                 source        TEXT NOT NULL DEFAULT 'website', -- 'website' | 'inbound-email'
                 ghl_contact_id TEXT,           -- link back to the GoHighLevel contact
-                reply_text    TEXT             -- the reply the team emailed, if any
+                reply_text    TEXT             -- the latest team reply (kept for compatibility)
+            );
+
+            -- One row per message in an enquiry's conversation thread: the team's
+            -- outbound replies and any inbound replies logged back. The original
+            -- enquiry stays in web_messages.message (shown as the first bubble).
+            CREATE TABLE IF NOT EXISTS web_message_entries (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                web_message_id INTEGER NOT NULL,
+                created_at     TEXT NOT NULL,
+                direction      TEXT NOT NULL,   -- 'out' (team → contact) | 'in' (contact → us)
+                author         TEXT,            -- team email (out) or contact name (in)
+                body           TEXT NOT NULL,
+                via            TEXT             -- 'email' | 'note'
             );
 
             CREATE TABLE IF NOT EXISTS blog_posts (
@@ -340,6 +353,27 @@ def init_db() -> None:
             conn.execute("ALTER TABLE web_messages ADD COLUMN ghl_contact_id TEXT")
         if web_cols and "reply_text" not in web_cols:
             conn.execute("ALTER TABLE web_messages ADD COLUMN reply_text TEXT")
+        # Backfill the conversation thread from any pre-existing single reply_text,
+        # so old replies show up in the new threaded view (run once).
+        try:
+            prior = conn.execute(
+                "SELECT id, reply_text, responded_by, responded_at, created_at FROM web_messages "
+                "WHERE reply_text IS NOT NULL AND TRIM(reply_text) != ''"
+            ).fetchall()
+            for r in prior:
+                seen = conn.execute(
+                    "SELECT 1 FROM web_message_entries WHERE web_message_id = ? LIMIT 1", (r["id"],)
+                ).fetchone()
+                if not seen:
+                    conn.execute(
+                        "INSERT INTO web_message_entries "
+                        "(web_message_id, created_at, direction, author, body, via) "
+                        "VALUES (?,?,?,?,?,?)",
+                        (r["id"], r["responded_at"] or r["created_at"], "out",
+                         r["responded_by"], r["reply_text"], "email"),
+                    )
+        except Exception:  # noqa: BLE001 - best effort backfill
+            pass
         patient_cols = {row["name"] for row in conn.execute("PRAGMA table_info(patients)")}
         if patient_cols and "headshot_path" not in patient_cols:
             conn.execute("ALTER TABLE patients ADD COLUMN headshot_path TEXT")
@@ -562,6 +596,37 @@ def set_web_message_reply(web_message_id: int, reply_text: str, responded_by: st
             "responded_at = ? WHERE id = ?",
             (reply_text, responded_by, datetime.now().isoformat(timespec="seconds"), web_message_id),
         )
+
+
+def add_web_message_entry(web_message_id: int, direction: str, body: str,
+                          author: str = "", via: str = "email") -> int:
+    """Append a message to an enquiry's thread. An outbound reply marks the
+    enquiry responded; an inbound (logged) reply reopens it as needing attention."""
+    now = datetime.now().isoformat(timespec="seconds")
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO web_message_entries "
+            "(web_message_id, created_at, direction, author, body, via) VALUES (?,?,?,?,?,?)",
+            (web_message_id, now, direction, author, (body or "").strip(), via),
+        )
+        if direction == "out":
+            conn.execute(
+                "UPDATE web_messages SET status='responded', responded_by=?, responded_at=?, "
+                "reply_text=? WHERE id=?",
+                (author, now, (body or "").strip(), web_message_id),
+            )
+        else:  # a contact wrote back → surface it as needing a response again
+            conn.execute("UPDATE web_messages SET status='new' WHERE id=?", (web_message_id,))
+        return int(cur.lastrowid)
+
+
+def list_web_message_entries(web_message_id: int) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM web_message_entries WHERE web_message_id = ? ORDER BY id ASC",
+            (web_message_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def list_web_messages(status: Optional[str] = None) -> list[dict]:

@@ -51,7 +51,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.35.1")
+app = FastAPI(title="vmedical-agent dashboard", version="4.36.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -1331,6 +1331,12 @@ def messages_inbox(request: Request, status: str = "new", debug: int = 0):
         items.append(m)
     for w in db.list_web_messages(status_filter):
         w["source"] = w.get("source") or "website"
+        entries = db.list_web_message_entries(w["id"])
+        w["entries"] = entries
+        w["has_reply"] = any(e["direction"] == "out" for e in entries)
+        # status is the source of truth: a reply marks it 'responded'; a logged
+        # inbound reply flips it back to 'new'. So 'new' == still needs attention.
+        w["awaiting"] = w["status"] != "responded"
         items.append(w)
     # One inbox, newest first across both sources.
     items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
@@ -1394,7 +1400,7 @@ def reply_web_message(request: Request, web_message_id: int, reply: str = Form(.
         request.session["messages_flash"] = {"ok": False, "msg": f"Couldn't send the reply: {exc}"}
         return RedirectResponse("/messages", status_code=303)
 
-    db.set_web_message_reply(web_message_id, body, user["email"])
+    db.add_web_message_entry(web_message_id, "out", body, author=user["email"], via="email")
     # Keep GoHighLevel in sync: log the reply as a note on the contact.
     if w.get("ghl_contact_id") and config.ghl_contacts_enabled():
         try:
@@ -1403,6 +1409,26 @@ def reply_web_message(request: Request, web_message_id: int, reply: str = Form(.
         except Exception:  # noqa: BLE001 - best effort
             pass
     request.session["messages_flash"] = {"ok": True, "msg": f"Reply sent to {to} from {config.CLINIC_REPLY_FROM}."}
+    return RedirectResponse("/messages", status_code=303)
+
+
+@app.post("/messages/web/{web_message_id}/log-inbound")
+def log_inbound_web_message(request: Request, web_message_id: int, inbound: str = Form(...)):
+    """Add a reply the contact sent back (by email or phone) to the thread, so the
+    whole conversation stays in one place. Reopens the enquiry as needing a reply."""
+    user, resp = _guard(request, "respond_messages")
+    if resp:
+        return resp
+    w = db.get_web_message(web_message_id)
+    body = (inbound or "").strip()
+    if not w:
+        request.session["messages_flash"] = {"ok": False, "msg": "That enquiry wasn't found."}
+    elif not body:
+        request.session["messages_flash"] = {"ok": False, "msg": "Nothing to log."}
+    else:
+        who = (w.get("name") or w.get("email") or "Contact")
+        db.add_web_message_entry(web_message_id, "in", body, author=who, via="email")
+        request.session["messages_flash"] = {"ok": True, "msg": "Their reply was added to the thread."}
     return RedirectResponse("/messages", status_code=303)
 
 

@@ -32,7 +32,7 @@
   {% else %}
     {% for m in messages %}
     {% if m.source in ('website', 'inbound-email') %}
-    <div class="msg-card {{ 'is-responded' if m.status == 'responded' }}">
+    <div class="msg-card wm {{ 'is-awaiting' if m.awaiting else 'is-responded' }}">
       <div class="msg-head">
         <div class="msg-who">
           <div class="avatar">{{ (m.name or m.email or '?')[0]|upper }}</div>
@@ -43,59 +43,61 @@
               {% if m.email %}{{ m.email }}{% endif %}
               {% if m.phone %}&nbsp;·&nbsp; {{ m.phone }}{% endif %}
               {% if m.page %}&nbsp;·&nbsp; {{ m.page }}{% endif %}
-              &nbsp;·&nbsp; {{ m.created_at.replace('T', ' ') }}
             </div>
           </div>
         </div>
         <div class="msg-actions">
-          {% if m.status == 'responded' %}
-            <span class="tag responded">Replied</span>
+          {% if m.awaiting %}
+            <span class="tag new">{{ 'Awaiting reply' if m.has_reply else 'Needs reply' }}</span>
           {% else %}
-            <span class="tag new">New</span>
-            {% if can(user.role, 'respond_messages') %}
-            <form method="post" action="/messages/web/{{ m.id }}/respond">
-              <button class="btn" type="submit">Mark replied</button>
-            </form>
-            {% endif %}
+            <span class="tag responded">✓ Replied{% if m.responded_by %} · {{ m.responded_by.split('@')[0] }}{% endif %}{% if m.responded_at %} · {{ m.responded_at[:10] }}{% endif %}</span>
           {% endif %}
         </div>
       </div>
 
       {% if m.subject %}
-      <div class="summary">
-        <span class="summary-label">Subject</span>{{ m.subject }}
-      </div>
-      {% endif %}
-      <div class="raw-transcript" style="margin-top:.6rem">{{ m.message }}</div>
-
-      {% if m.reply_text %}
-      <div class="wm-reply">
-        <div class="wm-reply-label">Your reply · sent from {{ reply_from }}</div>
-        <div class="wm-reply-body">{{ m.reply_text }}</div>
-      </div>
+      <div class="summary"><span class="summary-label">Subject</span>{{ m.subject }}</div>
       {% endif %}
 
-      {% if m.email and m.status != 'responded' and can(user.role, 'respond_messages') %}
-      <details class="wm-replybox" {{ 'open' if m.source == 'inbound-email' }}>
-        <summary class="btn secondary" style="display:inline-block">Reply by email</summary>
-        <form method="post" action="/messages/web/{{ m.id }}/reply" style="margin-top:.5rem">
-          <div class="muted" style="font-size:.8rem;margin-bottom:.3rem">To {{ m.email }} · from <strong>{{ reply_from }}</strong></div>
-          <textarea name="reply" rows="4" required placeholder="Type your reply…"
-            style="width:100%;box-sizing:border-box;padding:.6rem .7rem;border:1px solid var(--line);border-radius:8px;font:inherit"></textarea>
-          <div style="margin-top:.5rem;display:flex;gap:.5rem">
+      {# ---- Conversation thread: original enquiry, then every reply ---- #}
+      <div class="wm-thread">
+        <div class="wm-msg in">
+          <div class="wm-bubble">{{ m.message }}</div>
+          <div class="wm-byline">{{ m.name or 'Contact' }} · {{ m.created_at.replace('T',' ')[:16] }}</div>
+        </div>
+        {% for e in m.entries %}
+        <div class="wm-msg {{ e.direction }}">
+          <div class="wm-bubble">{{ e.body }}</div>
+          <div class="wm-byline">
+            {% if e.direction == 'out' %}{{ (e.author or 'Team').split('@')[0] }} · sent from {{ reply_from }}{% else %}{{ e.author or 'Contact' }} replied{% endif %}
+            · {{ e.created_at.replace('T',' ')[:16] }}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      {# ---- Reply inline (stays in this thread) ---- #}
+      {% if can(user.role, 'respond_messages') %}
+        {% if m.email %}
+        <form method="post" action="/messages/web/{{ m.id }}/reply" class="wm-replyform">
+          <div class="muted" style="font-size:.8rem;margin-bottom:.3rem">Reply to {{ m.email }} · sent from <strong>{{ reply_from }}</strong></div>
+          <textarea name="reply" rows="3" required placeholder="Type your reply…"></textarea>
+          <div class="wm-replyactions">
             <button class="btn" type="submit">Send reply</button>
-            <button class="btn ghost" type="submit" formaction="/messages/web/{{ m.id }}/respond" formnovalidate>Just mark replied</button>
+            {% if m.awaiting %}<button class="btn ghost" type="submit" formaction="/messages/web/{{ m.id }}/respond" formnovalidate>Mark handled</button>{% endif %}
+            <button type="button" class="btn ghost wm-logtoggle" data-target="log-{{ m.id }}">+ Log their reply</button>
           </div>
         </form>
-      </details>
-      {% elif m.email and m.status != 'responded' %}
-      <div style="margin-top:.6rem">
-        <a class="btn secondary" href="mailto:{{ m.email }}{% if m.subject %}?subject=Re: {{ m.subject|urlencode }}{% endif %}">Reply by email</a>
-      </div>
-      {% endif %}
-
-      {% if m.status == 'responded' and m.responded_by %}
-      <div class="responded-by muted">Replied by {{ m.responded_by }}</div>
+        <form method="post" action="/messages/web/{{ m.id }}/log-inbound" class="wm-logform" id="log-{{ m.id }}" hidden>
+          <div class="muted" style="font-size:.8rem;margin-bottom:.3rem">Paste a reply they sent back (by email or phone) to keep the thread complete:</div>
+          <textarea name="inbound" rows="2" required placeholder="What they wrote back…"></textarea>
+          <div class="wm-replyactions"><button class="btn secondary" type="submit">Add to thread</button></div>
+        </form>
+        {% else %}
+        <div class="muted" style="margin-top:.6rem;font-size:.85rem">No email address on this enquiry — reply by phone, then “Mark handled”.
+          <form method="post" action="/messages/web/{{ m.id }}/respond" style="display:inline"><button class="btn ghost" type="submit">Mark handled</button></form>
+        </div>
+        {% endif %}
       {% endif %}
     </div>
     {% else %}
@@ -163,11 +165,38 @@
   {% endif %}
 
   <style>
-    .wm-replybox{ margin-top:.6rem; }
-    .wm-replybox > summary{ list-style:none; cursor:pointer; }
-    .wm-replybox > summary::-webkit-details-marker{ display:none; }
-    .wm-reply{ margin-top:.6rem; border-left:3px solid #7D8B6E; padding:.4rem .7rem; background:#f6f7f3; border-radius:0 8px 8px 0; }
-    .wm-reply-label{ font-size:.74rem; color:var(--muted); font-weight:600; margin-bottom:.2rem; }
-    .wm-reply-body{ white-space:pre-wrap; font-size:.92rem; }
+    /* enquiry status accent down the left edge of the card */
+    .msg-card.wm{ border-left:4px solid transparent; }
+    .msg-card.wm.is-awaiting{ border-left-color:#d8a33b; }
+    .msg-card.wm.is-responded{ border-left-color:#7D8B6E; }
+    .tag.responded{ background:#e4ecd9; color:#4e5944; }
+    .tag.new{ background:#fbf0d6; color:#8a6d1f; }
+
+    /* conversation thread */
+    .wm-thread{ display:flex; flex-direction:column; gap:.55rem; margin:.7rem 0 .2rem; }
+    .wm-msg{ display:flex; flex-direction:column; max-width:82%; }
+    .wm-msg.in{ align-self:flex-start; align-items:flex-start; }
+    .wm-msg.out{ align-self:flex-end; align-items:flex-end; }
+    .wm-bubble{ white-space:pre-wrap; font-size:.93rem; line-height:1.4; padding:.55rem .75rem;
+      border-radius:12px; border:1px solid var(--line); }
+    .wm-msg.in .wm-bubble{ background:#f6f7f3; border-bottom-left-radius:4px; }
+    .wm-msg.out .wm-bubble{ background:#eaf0e0; border-bottom-right-radius:4px; }
+    .wm-byline{ font-size:.72rem; color:var(--muted); margin-top:.2rem; padding:0 .2rem; }
+
+    /* reply box (always visible, in-thread) */
+    .wm-replyform, .wm-logform{ margin-top:.7rem; }
+    .wm-replyform textarea, .wm-logform textarea{ width:100%; box-sizing:border-box; padding:.6rem .7rem;
+      border:1px solid var(--line); border-radius:8px; font:inherit; background:var(--surface,#fff); color:inherit; }
+    .wm-replyactions{ margin-top:.5rem; display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+    .wm-logtoggle{ margin-left:auto; font-size:.85rem; }
   </style>
+
+  <script>
+  document.querySelectorAll('.wm-logtoggle').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var f = document.getElementById(btn.dataset.target);
+      if(f){ f.hidden = !f.hidden; if(!f.hidden) f.querySelector('textarea').focus(); }
+    });
+  });
+  </script>
 {% endblock %}
