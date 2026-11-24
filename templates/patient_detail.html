@@ -144,6 +144,72 @@
     {% endif %}
   </div>
 
+  {# ---- Compression-garment measurements (SMF form) ---- #}
+  <div class="card" id="measurements">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+      <h2 style="font-size:1.1rem;margin:0;color:#5E6B51">Compression measurements <span class="muted" style="font-weight:400">({{ measurements|length }})</span></h2>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+        <a class="btn" href="/patients/{{ patient.id }}/measurements/new">+ Add measurements</a>
+        {% if measurements %}<a class="btn ghost" href="/patients/{{ patient.id }}/measurements/print" target="_blank" rel="noopener">🖨 Print form</a>{% endif %}
+      </div>
+    </div>
+
+    <details class="mt-profile">
+      <summary>Insurance &amp; billing details{% if garment_profile.insurance_co %} — <span class="muted">{{ garment_profile.insurance_co }}</span>{% endif %}</summary>
+      <form method="post" action="/patients/{{ patient.id }}/garment-profile" class="mt-pgrid">
+        {% set gp = garment_profile %}
+        {% for key, lbl in [('insurance_co','Insurance Co'),('policy_no','Policy #'),('group_no','Group #'),
+            ('pairs_covered','# Pairs covered'),('deductible','Deductible %'),('consecutive_year','Consecutive Year'),
+            ('calendar_year','Calendar Year'),('direct_billing','Direct Billing'),('dnd','DND'),('rcmp','RCMP'),
+            ('va','VA'),('sales_rep','Sales Rep')] %}
+        <label class="mt-pfield"><span>{{ lbl }}</span><input type="text" name="{{ key }}" value="{{ gp.get(key) or '' }}"></label>
+        {% endfor %}
+        <div style="grid-column:1/-1;margin-top:.3rem"><button class="btn secondary" type="submit">Save details</button></div>
+      </form>
+    </details>
+
+    {% if measurements %}
+    <div class="mt-wrap">
+      <table class="mt">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th title="Ankle Right">Ank R</th><th title="Ankle Left">Ank L</th>
+            <th title="Calf Right">Calf R</th><th title="Calf Left">Calf L</th><th>Calf Len</th>
+            <th title="Thigh Right">Thigh R</th><th title="Thigh Left">Thigh L</th><th>Thigh Len</th>
+            <th>Hip</th><th>Shoe</th><th>Model #</th><th>Invoice</th><th>Billed</th>
+            <th title="Paid in full">Paid</th><th title="Mail when in">Mail-in</th>
+            <th title="Mailed out">Mailed</th><th title="Year max out">Yr max</th>
+            <th>Notes</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for x in measurements %}
+          <tr>
+            <td class="mt-date">{{ x.measure_date or '—' }}</td>
+            <td>{{ x.ankle_right or '' }}</td><td>{{ x.ankle_left or '' }}</td>
+            <td>{{ x.calf_right or '' }}</td><td>{{ x.calf_left or '' }}</td><td>{{ x.calf_length or '' }}</td>
+            <td>{{ x.thigh_right or '' }}</td><td>{{ x.thigh_left or '' }}</td><td>{{ x.thigh_length or '' }}</td>
+            <td>{{ x.hip or '' }}</td><td>{{ x.shoe_size or '' }}</td><td>{{ x.model_fitted or '' }}</td>
+            <td>{{ x.invoice_no or '' }}</td><td>{{ x.billed or '' }}</td>
+            <td class="mt-yes">{{ '✓' if x.paid_in_full }}</td><td class="mt-yes">{{ '✓' if x.mail_when_in }}</td>
+            <td class="mt-yes">{{ '✓' if x.mailed_out }}</td><td class="mt-yes">{{ '✓' if x.year_max_out }}</td>
+            <td class="mt-notes">{{ x.notes or '' }}</td>
+            <td class="mt-row-actions">
+              <a href="/patients/{{ patient.id }}/measurements/{{ x.id }}/edit" title="Edit">✎</a>
+              <form method="post" action="/patients/{{ patient.id }}/measurements/{{ x.id }}/delete"
+                    onsubmit="return confirm('Delete this measurement line?')"><button type="submit" title="Delete">🗑</button></form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p class="muted" style="margin:.6rem 0 0">No measurements yet. Tap “Add measurements” to record a fitting.</p>
+    {% endif %}
+  </div>
+
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
       <h2 style="font-size:1.1rem;margin:0;color:#5E6B51">Progress photos <span class="muted" style="font-weight:400">({{ photo_count }})</span></h2>
@@ -275,6 +341,28 @@
     .ph-actions{ display:flex; gap:.6rem; align-items:center; justify-content:center; margin-top:.2rem; }
     .ph-actions a, .ph-actions button{ background:none; border:0; cursor:pointer; font-size:.9rem; text-decoration:none; color:var(--muted); padding:0; }
     .ph-actions form{ display:inline; }
+
+    /* compression measurements */
+    .mt-profile{ margin:.7rem 0; }
+    .mt-profile > summary{ cursor:pointer; font-weight:600; color:#5E6B51; font-size:.92rem; }
+    .mt-pgrid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.6rem; margin-top:.7rem; }
+    .mt-pfield{ display:flex; flex-direction:column; gap:.25rem; }
+    .mt-pfield > span{ font-size:.78rem; font-weight:600; color:var(--muted); }
+    .mt-pfield input{ width:100%; box-sizing:border-box; padding:.5rem .6rem; border:1px solid var(--line);
+      border-radius:8px; background:var(--surface,#fff); color:inherit; font-size:.92rem; }
+    .mt-wrap{ overflow-x:auto; margin-top:.7rem; -webkit-overflow-scrolling:touch; }
+    .mt{ border-collapse:collapse; font-size:.86rem; white-space:nowrap; min-width:100%; }
+    .mt th{ text-align:center; font-size:.72rem; color:var(--muted); font-weight:700; padding:.4rem .5rem;
+      border-bottom:2px solid var(--line); position:sticky; top:0; background:var(--surface,#fff); }
+    .mt td{ text-align:center; padding:.45rem .5rem; border-bottom:1px solid var(--line); }
+    .mt .mt-date{ font-weight:700; color:#2A2B27; text-align:left; position:sticky; left:0;
+      background:var(--surface,#fff); }
+    .mt .mt-yes{ color:#4e5944; font-weight:700; }
+    .mt .mt-notes{ text-align:left; white-space:normal; min-width:160px; max-width:240px; }
+    .mt .mt-row-actions{ white-space:nowrap; }
+    .mt .mt-row-actions a, .mt .mt-row-actions button{ background:none; border:0; cursor:pointer;
+      color:var(--muted); text-decoration:none; font-size:.9rem; padding:0 .2rem; }
+    .mt .mt-row-actions form{ display:inline; }
 
     /* lightbox */
     .lb{ position:fixed; inset:0; z-index:1000; display:none; align-items:center; justify-content:center;

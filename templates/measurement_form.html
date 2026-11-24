@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if m else 'Add' }} measurements · {{ label }}{% endblock %}
+{% block nav %}patients{% endblock %}
+{% block content %}
+  {% macro mf_num(label, name, m) %}
+    <label class="mf-field"><span>{{ label }}</span>
+      <input type="text" inputmode="decimal" name="{{ name }}" value="{{ m[name] or '' if m else '' }}"></label>
+  {% endmacro %}
+  {% macro mf_txt(label, name, m) %}
+    <label class="mf-field"><span>{{ label }}</span>
+      <input type="text" name="{{ name }}" value="{{ m[name] or '' if m else '' }}"></label>
+  {% endmacro %}
+  {% macro mf_bool(label, name, m) %}
+    <label class="mf-toggle">
+      <input type="checkbox" name="{{ name }}" value="1" {{ 'checked' if m and m[name] }}>{{ label }}</label>
+  {% endmacro %}
+
+  <div class="mf-head">
+    <a href="/patients/{{ patient.id }}#measurements" class="muted" style="text-decoration:none">‹ {{ label }}</a>
+    <h1 style="margin:.2rem 0 0">{{ 'Edit measurements' if m else 'Add measurements' }}</h1>
+  </div>
+
+  <form method="post" action="/patients/{{ patient.id }}/measurements{{ '/' ~ m.id if m else '' }}" class="mf">
+    <div class="card mf-card">
+      <label class="mf-field mf-date">
+        <span>Date</span>
+        <input type="date" name="measure_date" value="{{ (m.measure_date if m else today) or today }}" required>
+      </label>
+    </div>
+
+    <div class="card mf-card">
+      <h2 class="mf-h2">Measurements</h2>
+      <div class="mf-grid">
+        {% set num = {'inputmode':'decimal'} %}
+        {{ mf_num('Ankle — Right', 'ankle_right', m) }}
+        {{ mf_num('Ankle — Left', 'ankle_left', m) }}
+        {{ mf_num('Calf — Right', 'calf_right', m) }}
+        {{ mf_num('Calf — Left', 'calf_left', m) }}
+        {{ mf_num('Calf Length', 'calf_length', m) }}
+        {{ mf_num('Hip', 'hip', m) }}
+        {{ mf_num('Thigh — Right', 'thigh_right', m) }}
+        {{ mf_num('Thigh — Left', 'thigh_left', m) }}
+        {{ mf_num('Thigh Length', 'thigh_length', m) }}
+        {{ mf_txt('Shoe Size', 'shoe_size', m) }}
+      </div>
+    </div>
+
+    <div class="card mf-card">
+      <h2 class="mf-h2">Fitting &amp; billing</h2>
+      <div class="mf-grid">
+        {{ mf_txt('Model # Fitted', 'model_fitted', m) }}
+        {{ mf_txt('Invoice No.', 'invoice_no', m) }}
+        {{ mf_txt('Billed', 'billed', m) }}
+      </div>
+      <div class="mf-toggles">
+        {{ mf_bool('Paid in full', 'paid_in_full', m) }}
+        {{ mf_bool('Mail when in', 'mail_when_in', m) }}
+        {{ mf_bool('Mailed out', 'mailed_out', m) }}
+        {{ mf_bool('Year max out', 'year_max_out', m) }}
+      </div>
+    </div>
+
+    <div class="card mf-card">
+      <label class="mf-field"><span>Notes</span>
+        <textarea name="notes" rows="3" placeholder="Anything else about this fitting…">{{ m.notes or '' if m else '' }}</textarea>
+      </label>
+    </div>
+
+    <div class="mf-actions">
+      <a class="btn ghost" href="/patients/{{ patient.id }}#measurements">Cancel</a>
+      <button class="btn" type="submit">{{ 'Save changes' if m else 'Save measurements' }}</button>
+    </div>
+  </form>
+
+  <style>
+    .mf-head{ margin-bottom:.6rem; }
+    .mf{ max-width:720px; }
+    .mf-card{ margin-bottom:.9rem; }
+    .mf-h2{ font-size:1rem; margin:0 0 .7rem; color:#5E6B51; }
+    .mf-grid{ display:grid; grid-template-columns:1fr 1fr; gap:.7rem .8rem; }
+    .mf-field{ display:flex; flex-direction:column; gap:.3rem; }
+    .mf-field > span{ font-size:.82rem; font-weight:600; color:var(--muted); }
+    .mf-field input, .mf-field textarea{ width:100%; box-sizing:border-box; padding:.7rem .75rem;
+      border:1px solid var(--line); border-radius:10px; font-size:1.05rem; background:var(--surface,#fff); color:inherit; }
+    .mf-date{ max-width:260px; }
+    .mf-toggles{ display:grid; grid-template-columns:1fr 1fr; gap:.6rem; margin-top:.9rem; }
+    .mf-toggle{ display:flex; align-items:center; gap:.6rem; padding:.7rem .8rem; border:1px solid var(--line);
+      border-radius:10px; cursor:pointer; font-weight:600; font-size:.95rem; }
+    .mf-toggle input{ width:22px; height:22px; flex:0 0 auto; accent-color:#7D8B6E; }
+    .mf-toggle:has(input:checked){ background:#eaf0e0; border-color:#9fb089; }
+    .mf-actions{ display:flex; gap:.7rem; justify-content:flex-end; position:sticky; bottom:0;
+      padding:.8rem 0; background:linear-gradient(transparent, var(--bg, #f3f4f0) 40%); }
+    .mf-actions .btn{ font-size:1.05rem; padding:.7rem 1.3rem; }
+    @media (max-width:560px){
+      .mf-grid{ grid-template-columns:1fr 1fr; }
+      .mf-toggles{ grid-template-columns:1fr; }
+      .mf-actions .btn{ flex:1; text-align:center; }
+    }
+  </style>
+{% endblock %}

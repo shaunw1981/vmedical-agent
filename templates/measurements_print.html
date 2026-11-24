@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Measurement form · {{ label }}</title>
+<style>
+  :root{ --line:#333; }
+  *{ box-sizing:border-box; }
+  body{ font-family:-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:#111;
+    margin:0; padding:18px 20px; font-size:12px; background:#fff; }
+  .pbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+  .pbar h1{ font-size:1.1rem; margin:0; }
+  .pbar .btns a, .pbar .btns button{ font:inherit; padding:.45rem .9rem; border:1px solid #888;
+    border-radius:7px; background:#f3f4f0; cursor:pointer; text-decoration:none; color:#111; margin-left:.4rem; }
+  .hdr{ display:grid; grid-template-columns:1fr 1fr; gap:4px 28px; margin-bottom:14px; }
+  .hdr .f{ display:flex; gap:6px; border-bottom:1px solid var(--line); padding:3px 0; }
+  .hdr .f b{ font-weight:600; white-space:nowrap; color:#333; font-size:11px; }
+  .hdr .f span{ flex:1; }
+  table{ border-collapse:collapse; width:100%; font-size:10.5px; }
+  th, td{ border:1px solid var(--line); padding:4px 5px; text-align:center; height:24px; }
+  th{ background:#efefef; font-size:9.5px; line-height:1.15; }
+  td.d{ text-align:left; font-weight:600; white-space:nowrap; }
+  td.n{ text-align:left; }
+  .grp{ font-size:8.5px; color:#555; }
+  @media print{
+    .pbar .btns{ display:none; }
+    body{ padding:0; }
+    @page{ size:landscape; margin:12mm; }
+  }
+</style>
+</head>
+<body>
+  <div class="pbar">
+    <h1>Compression Measurement Form — {{ label }}</h1>
+    <div class="btns">
+      <button onclick="window.print()">🖨 Print</button>
+      <a href="/patients/{{ patient.id }}#measurements">Close</a>
+    </div>
+  </div>
+
+  <div class="hdr">
+    <div class="f"><b>Patient Name</b><span>{{ label }}</span></div>
+    <div class="f"><b>Insurance Co</b><span>{{ profile.insurance_co or '' }}</span></div>
+    <div class="f"><b>Email</b><span>{{ patient.email or '' }}</span></div>
+    <div class="f"><b>Policy #</b><span>{{ profile.policy_no or '' }}</span></div>
+    <div class="f"><b>Phone</b><span>{{ patient.phone or '' }}</span></div>
+    <div class="f"><b>Group #</b><span>{{ profile.group_no or '' }}</span></div>
+    <div class="f"><b>Sales Rep</b><span>{{ profile.sales_rep or '' }}</span></div>
+    <div class="f"><b># Pairs covered</b><span>{{ profile.pairs_covered or '' }}</span></div>
+    <div class="f"><b>Direct Billing</b><span>{{ profile.direct_billing or '' }}</span></div>
+    <div class="f"><b>Deductible %</b><span>{{ profile.deductible or '' }}</span></div>
+    <div class="f"><b>DND / RCMP / VA</b><span>{{ [profile.dnd, profile.rcmp, profile.va]|select|join(' · ') }}</span></div>
+    <div class="f"><b>Consecutive / Calendar Yr</b><span>{{ [profile.consecutive_year, profile.calendar_year]|select|join(' · ') }}</span></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th rowspan="2">Date</th>
+        <th colspan="2">Ankle</th><th colspan="2">Calf</th><th rowspan="2">Calf<br>Length</th>
+        <th colspan="2">Thigh</th><th rowspan="2">Thigh<br>Length</th>
+        <th rowspan="2">Hip</th><th rowspan="2">Shoe<br>Size</th><th rowspan="2">Model # Fitted</th>
+        <th rowspan="2">Invoice<br>No.</th><th rowspan="2">Billed</th>
+        <th rowspan="2">Paid in<br>Full</th><th rowspan="2">Mail<br>When In</th>
+        <th rowspan="2">Mailed<br>Out</th><th rowspan="2">Year Max<br>Out</th><th rowspan="2">Notes</th>
+      </tr>
+      <tr>
+        <th class="grp">Right</th><th class="grp">Left</th><th class="grp">Right</th><th class="grp">Left</th>
+        <th class="grp">Right</th><th class="grp">Left</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for x in measurements %}
+      <tr>
+        <td class="d">{{ x.measure_date or '' }}</td>
+        <td>{{ x.ankle_right or '' }}</td><td>{{ x.ankle_left or '' }}</td>
+        <td>{{ x.calf_right or '' }}</td><td>{{ x.calf_left or '' }}</td><td>{{ x.calf_length or '' }}</td>
+        <td>{{ x.thigh_right or '' }}</td><td>{{ x.thigh_left or '' }}</td><td>{{ x.thigh_length or '' }}</td>
+        <td>{{ x.hip or '' }}</td><td>{{ x.shoe_size or '' }}</td><td>{{ x.model_fitted or '' }}</td>
+        <td>{{ x.invoice_no or '' }}</td><td>{{ x.billed or '' }}</td>
+        <td>{{ '✓' if x.paid_in_full }}</td><td>{{ '✓' if x.mail_when_in }}</td>
+        <td>{{ '✓' if x.mailed_out }}</td><td>{{ '✓' if x.year_max_out }}</td>
+        <td class="n">{{ x.notes or '' }}</td>
+      </tr>
+      {% endfor %}
+      {# pad with blank rows so it reads like the paper form #}
+      {% for _ in range([0, 14 - measurements|length]|max) %}
+      <tr>{% for _ in range(19) %}<td>&nbsp;</td>{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

@@ -237,7 +237,8 @@ def init_db() -> None:
                 active          INTEGER NOT NULL DEFAULT 1,
                 created_by      TEXT,
                 headshot_path   TEXT,            -- profile/ID headshot (full), local path
-                headshot_thumb  TEXT             -- small round avatar thumbnail
+                headshot_thumb  TEXT,            -- small round avatar thumbnail
+                garment_profile TEXT             -- JSON: compression-garment insurance/billing header
             );
 
             -- The photo positions/poses the team can choose from (managed in
@@ -313,6 +314,28 @@ def init_db() -> None:
                 note_file    TEXT             -- the memory filename once approved
             );
 
+            -- Compression-garment measurement + billing log (one row per fitting
+            -- date), the digital version of the clinic's paper SMF form.
+            CREATE TABLE IF NOT EXISTS patient_measurements (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at    TEXT NOT NULL,
+                patient_id    INTEGER NOT NULL,
+                measure_date  TEXT,              -- the "Date" column (YYYY-MM-DD)
+                ankle_right   TEXT, ankle_left   TEXT,
+                calf_right    TEXT, calf_left    TEXT, calf_length TEXT,
+                thigh_right   TEXT, thigh_left   TEXT, thigh_length TEXT,
+                hip           TEXT, shoe_size    TEXT,
+                model_fitted  TEXT,
+                invoice_no    TEXT,
+                billed        TEXT,
+                paid_in_full  INTEGER NOT NULL DEFAULT 0,
+                mail_when_in  INTEGER NOT NULL DEFAULT 0,
+                mailed_out    INTEGER NOT NULL DEFAULT 0,
+                year_max_out  INTEGER NOT NULL DEFAULT 0,
+                notes         TEXT,
+                created_by    TEXT
+            );
+
             -- Document / file attachments on a patient. Files live on disk;
             -- this table records metadata + the local path.
             CREATE TABLE IF NOT EXISTS patient_documents (
@@ -379,6 +402,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE patients ADD COLUMN headshot_path TEXT")
         if patient_cols and "headshot_thumb" not in patient_cols:
             conn.execute("ALTER TABLE patients ADD COLUMN headshot_thumb TEXT")
+        if patient_cols and "garment_profile" not in patient_cols:
+            conn.execute("ALTER TABLE patients ADD COLUMN garment_profile TEXT")
         photo_cols = {row["name"] for row in conn.execute("PRAGMA table_info(patient_photos)")}
         if photo_cols and "source" not in photo_cols:
             # 'capture' (taken in-app) vs 'import' (bulk-imported from the archive)
@@ -1059,6 +1084,83 @@ def get_patient_document(doc_id: int) -> Optional[dict]:
 def delete_patient_document(doc_id: int) -> None:
     with _connect() as conn:
         conn.execute("DELETE FROM patient_documents WHERE id = ?", (doc_id,))
+
+
+# --- Compression-garment measurements (the SMF form) -------------------------
+_MEASUREMENT_FIELDS = [
+    "measure_date", "ankle_right", "ankle_left", "calf_right", "calf_left",
+    "calf_length", "thigh_right", "thigh_left", "thigh_length", "hip", "shoe_size",
+    "model_fitted", "invoice_no", "billed", "paid_in_full", "mail_when_in",
+    "mailed_out", "year_max_out", "notes",
+]
+_MEASUREMENT_BOOLS = {"paid_in_full", "mail_when_in", "mailed_out", "year_max_out"}
+
+
+def _clean_measurement(fields: dict) -> dict:
+    out = {}
+    for k in _MEASUREMENT_FIELDS:
+        v = fields.get(k)
+        if k in _MEASUREMENT_BOOLS:
+            out[k] = 1 if v in (1, True, "1", "on", "true", "yes") else 0
+        else:
+            out[k] = (v.strip() if isinstance(v, str) else v) or None
+    return out
+
+
+def add_patient_measurement(patient_id: int, created_by: str = "", **fields) -> int:
+    vals = _clean_measurement(fields)
+    cols = ", ".join(_MEASUREMENT_FIELDS)
+    ph = ", ".join("?" for _ in _MEASUREMENT_FIELDS)
+    with _connect() as conn:
+        cur = conn.execute(
+            f"INSERT INTO patient_measurements (created_at, patient_id, created_by, {cols}) "
+            f"VALUES (?, ?, ?, {ph})",
+            (datetime.now().isoformat(timespec="seconds"), patient_id, created_by,
+             *[vals[k] for k in _MEASUREMENT_FIELDS]),
+        )
+        return int(cur.lastrowid)
+
+
+def update_patient_measurement(measurement_id: int, **fields) -> None:
+    vals = _clean_measurement(fields)
+    cols = ", ".join(f"{k} = ?" for k in _MEASUREMENT_FIELDS)
+    with _connect() as conn:
+        conn.execute(f"UPDATE patient_measurements SET {cols} WHERE id = ?",
+                     (*[vals[k] for k in _MEASUREMENT_FIELDS], measurement_id))
+
+
+def get_patient_measurement(measurement_id: int) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM patient_measurements WHERE id = ?",
+                           (measurement_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_patient_measurements(patient_id: int) -> list[dict]:
+    """Oldest first, to read like the paper form (filled top-down over time)."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM patient_measurements WHERE patient_id = ? "
+            "ORDER BY measure_date IS NULL, measure_date ASC, id ASC", (patient_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_patient_measurement(measurement_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM patient_measurements WHERE id = ?", (measurement_id,))
+
+
+def count_patient_measurements(patient_id: int) -> int:
+    with _connect() as conn:
+        return conn.execute("SELECT COUNT(*) FROM patient_measurements WHERE patient_id = ?",
+                           (patient_id,)).fetchone()[0]
+
+
+def set_garment_profile(patient_id: int, profile_json: str) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE patients SET garment_profile = ?, updated_at = ? WHERE id = ?",
+                     (profile_json or None, datetime.now().isoformat(timespec="seconds"), patient_id))
 
 
 # --- Charlie learnings (review-then-learn queue) -----------------------------

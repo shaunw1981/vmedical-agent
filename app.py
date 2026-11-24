@@ -51,7 +51,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.36.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.37.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -2482,6 +2482,8 @@ def patient_detail(request: Request, patient_id: int):
              photo_positions=pos_positions, photo_rows=photo_rows,
              photo_count=len(photos_rows),
              timeline=timeline, documents=documents,
+             measurements=db.list_patient_measurements(patient_id),
+             garment_profile=_garment_profile(patient),
              can_photos=config.can(user["role"], "manage_photos"),
              flash=request.session.pop("patients_flash", None)),
     )
@@ -2643,6 +2645,118 @@ def patient_delete_headshot(request: Request, patient_id: int):
         db.set_patient_headshot(patient_id, "", "")
         request.session["patients_flash"] = {"ok": True, "msg": "Headshot removed."}
     return RedirectResponse(f"/patients/{patient_id}", status_code=303)
+
+
+# --- Compression-garment measurements (the SMF form) ------------------------
+GARMENT_FIELDS = ["insurance_co", "policy_no", "group_no", "pairs_covered",
+                  "deductible", "consecutive_year", "calendar_year", "direct_billing",
+                  "dnd", "rcmp", "va", "sales_rep"]
+
+
+def _garment_profile(patient: dict) -> dict:
+    import json
+    try:
+        return json.loads(patient.get("garment_profile") or "{}")
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+@app.get("/patients/{patient_id}/measurements/new", response_class=HTMLResponse)
+def patient_measurement_new(request: Request, patient_id: int):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    patient = db.get_patient(patient_id)
+    if not patient:
+        return templates.TemplateResponse("403.html", _ctx(request, user), status_code=404)
+    from datetime import date
+    return templates.TemplateResponse("measurement_form.html", _ctx(
+        request, user, patient=patient, label=_patient_label(patient),
+        m=None, today=date.today().isoformat()))
+
+
+@app.get("/patients/{patient_id}/measurements/print", response_class=HTMLResponse)
+def patient_measurements_print(request: Request, patient_id: int):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    patient = db.get_patient(patient_id)
+    if not patient:
+        return templates.TemplateResponse("403.html", _ctx(request, user), status_code=404)
+    return templates.TemplateResponse("measurements_print.html", {
+        "request": request, "patient": patient, "label": _patient_label(patient),
+        "measurements": db.list_patient_measurements(patient_id),
+        "profile": _garment_profile(patient)})
+
+
+@app.get("/patients/{patient_id}/measurements/{mid}/edit", response_class=HTMLResponse)
+def patient_measurement_edit(request: Request, patient_id: int, mid: int):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    patient = db.get_patient(patient_id)
+    m = db.get_patient_measurement(mid)
+    if not patient or not m or m["patient_id"] != patient_id:
+        return templates.TemplateResponse("403.html", _ctx(request, user), status_code=404)
+    return templates.TemplateResponse("measurement_form.html", _ctx(
+        request, user, patient=patient, label=_patient_label(patient),
+        m=m, today=m.get("measure_date") or ""))
+
+
+@app.post("/patients/{patient_id}/measurements")
+async def patient_measurement_create(request: Request, patient_id: int):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    if not db.get_patient(patient_id):
+        return JSONResponse({"error": "unknown patient"}, status_code=404)
+    form = await request.form()
+    data = {k: form.get(k) for k in db._MEASUREMENT_FIELDS}
+    db.add_patient_measurement(patient_id, created_by=user["email"], **data)
+    request.session["patients_flash"] = {"ok": True, "msg": "Measurements added."}
+    return RedirectResponse(f"/patients/{patient_id}#measurements", status_code=303)
+
+
+@app.post("/patients/{patient_id}/measurements/{mid}")
+async def patient_measurement_update(request: Request, patient_id: int, mid: int):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    m = db.get_patient_measurement(mid)
+    if not m or m["patient_id"] != patient_id:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    form = await request.form()
+    data = {k: form.get(k) for k in db._MEASUREMENT_FIELDS}
+    db.update_patient_measurement(mid, **data)
+    request.session["patients_flash"] = {"ok": True, "msg": "Measurements updated."}
+    return RedirectResponse(f"/patients/{patient_id}#measurements", status_code=303)
+
+
+@app.post("/patients/{patient_id}/measurements/{mid}/delete")
+def patient_measurement_delete(request: Request, patient_id: int, mid: int):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    m = db.get_patient_measurement(mid)
+    if m and m["patient_id"] == patient_id:
+        db.delete_patient_measurement(mid)
+        request.session["patients_flash"] = {"ok": True, "msg": "Measurement line deleted."}
+    return RedirectResponse(f"/patients/{patient_id}#measurements", status_code=303)
+
+
+@app.post("/patients/{patient_id}/garment-profile")
+async def patient_garment_profile_save(request: Request, patient_id: int):
+    user, resp = _guard(request, "manage_patients")
+    if resp:
+        return resp
+    if not db.get_patient(patient_id):
+        return JSONResponse({"error": "unknown patient"}, status_code=404)
+    import json
+    form = await request.form()
+    data = {k: (form.get(k) or "").strip() for k in GARMENT_FIELDS}
+    db.set_garment_profile(patient_id, json.dumps(data))
+    request.session["patients_flash"] = {"ok": True, "msg": "Insurance & billing details saved."}
+    return RedirectResponse(f"/patients/{patient_id}#measurements", status_code=303)
 
 
 @app.post("/patients/{patient_id}/edit")
