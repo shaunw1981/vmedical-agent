@@ -155,8 +155,33 @@ def init_db() -> None:
                 workflow_name  TEXT,
                 ghl_contact_id TEXT,
                 ghl_appointment_id TEXT,
-                status         TEXT NOT NULL DEFAULT 'scheduled',  -- scheduled|cancelled
-                note           TEXT
+                status         TEXT NOT NULL DEFAULT 'scheduled',  -- scheduled|cancelled|done
+                note           TEXT,
+                patient_id     INTEGER,          -- link to the local patient record
+                lead_days      INTEGER NOT NULL DEFAULT 3,
+                email_subject  TEXT,             -- editable reminder content (owned here)
+                email_body     TEXT,
+                sms_text       TEXT,
+                reminder_due_at TEXT,            -- when the reminder should send (local ISO)
+                reminder_sent_at TEXT,           -- null until sent
+                review_days    INTEGER NOT NULL DEFAULT 0,  -- days after appt for a review ask (0=off)
+                review_body    TEXT,
+                review_due_at  TEXT,
+                review_sent_at TEXT
+            );
+
+            -- Editable reminder templates, one per appointment type. The content
+            -- lives here (not in GoHighLevel) so the team can edit it in-app.
+            CREATE TABLE IF NOT EXISTS reminder_templates (
+                type_key      TEXT PRIMARY KEY,
+                lead_days     INTEGER NOT NULL DEFAULT 3,
+                email_subject TEXT,
+                email_body    TEXT,
+                sms_text      TEXT,
+                review_days   INTEGER NOT NULL DEFAULT 0,
+                review_body   TEXT,
+                updated_at    TEXT,
+                updated_by    TEXT
             );
 
             CREATE TABLE IF NOT EXISTS web_messages (
@@ -369,6 +394,21 @@ def init_db() -> None:
         appt_cols = {row["name"] for row in conn.execute("PRAGMA table_info(appointments)")}
         if appt_cols and "ghl_appointment_id" not in appt_cols:
             conn.execute("ALTER TABLE appointments ADD COLUMN ghl_appointment_id TEXT")
+        for col, ddl in [
+            ("patient_id", "patient_id INTEGER"),
+            ("lead_days", "lead_days INTEGER NOT NULL DEFAULT 3"),
+            ("email_subject", "email_subject TEXT"),
+            ("email_body", "email_body TEXT"),
+            ("sms_text", "sms_text TEXT"),
+            ("reminder_due_at", "reminder_due_at TEXT"),
+            ("reminder_sent_at", "reminder_sent_at TEXT"),
+            ("review_days", "review_days INTEGER NOT NULL DEFAULT 0"),
+            ("review_body", "review_body TEXT"),
+            ("review_due_at", "review_due_at TEXT"),
+            ("review_sent_at", "review_sent_at TEXT"),
+        ]:
+            if appt_cols and col not in appt_cols:
+                conn.execute(f"ALTER TABLE appointments ADD COLUMN {ddl}")
         web_cols = {row["name"] for row in conn.execute("PRAGMA table_info(web_messages)")}
         if web_cols and "source" not in web_cols:
             conn.execute("ALTER TABLE web_messages ADD COLUMN source TEXT NOT NULL DEFAULT 'website'")
@@ -1254,22 +1294,123 @@ def add_appointment(
     ghl_appointment_id: Optional[str] = None,
     created_by: Optional[str] = None,
     note: Optional[str] = None,
+    patient_id: Optional[int] = None,
+    lead_days: int = 3,
+    email_subject: Optional[str] = None,
+    email_body: Optional[str] = None,
+    sms_text: Optional[str] = None,
+    reminder_due_at: Optional[str] = None,
+    review_days: int = 0,
+    review_body: Optional[str] = None,
+    review_due_at: Optional[str] = None,
 ) -> int:
     with _connect() as conn:
         cur = conn.execute(
             "INSERT INTO appointments "
             "(created_at, created_by, contact_name, email, phone, appt_at, "
             " type_key, type_label, workflow_id, workflow_name, ghl_contact_id, "
-            " ghl_appointment_id, status, note) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)",
+            " ghl_appointment_id, status, note, patient_id, lead_days, email_subject, "
+            " email_body, sms_text, reminder_due_at, review_days, review_body, review_due_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 datetime.now().isoformat(timespec="seconds"),
                 created_by, contact_name, email, phone, appt_at,
                 type_key, type_label, workflow_id, workflow_name, ghl_contact_id,
-                ghl_appointment_id, note,
+                ghl_appointment_id, note, patient_id, lead_days, email_subject,
+                email_body, sms_text, reminder_due_at, review_days, review_body, review_due_at,
             ),
         )
         return int(cur.lastrowid)
+
+
+def get_appointment(appt_id: int) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM appointments WHERE id = ?", (appt_id,)).fetchone()
+        return dict(row) if row else None
+
+
+_APPT_EDIT_FIELDS = {"contact_name", "email", "phone", "appt_at", "type_key", "type_label",
+                     "lead_days", "email_subject", "email_body", "sms_text",
+                     "reminder_due_at", "review_days", "review_body", "review_due_at", "status"}
+
+
+def update_appointment(appt_id: int, **fields) -> None:
+    sets = {k: v for k, v in fields.items() if k in _APPT_EDIT_FIELDS}
+    if not sets:
+        return
+    cols = ", ".join(f"{k} = ?" for k in sets)
+    with _connect() as conn:
+        conn.execute(f"UPDATE appointments SET {cols} WHERE id = ?", (*sets.values(), appt_id))
+
+
+def due_reminders(now_iso: str) -> list[dict]:
+    """Scheduled appointments whose reminder is due and not yet sent."""
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM appointments WHERE status = 'scheduled' AND reminder_sent_at IS NULL "
+            "AND reminder_due_at IS NOT NULL AND reminder_due_at <= ? ORDER BY reminder_due_at",
+            (now_iso,),
+        ).fetchall()]
+
+
+def due_reviews(now_iso: str) -> list[dict]:
+    """Appointments whose post-visit review ask is due and not yet sent."""
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM appointments WHERE status != 'cancelled' AND review_sent_at IS NULL "
+            "AND review_due_at IS NOT NULL AND review_due_at <= ? ORDER BY review_due_at",
+            (now_iso,),
+        ).fetchall()]
+
+
+def mark_reminder_sent(appt_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE appointments SET reminder_sent_at = ? WHERE id = ?",
+                     (datetime.now().isoformat(timespec="seconds"), appt_id))
+
+
+def mark_review_sent(appt_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE appointments SET review_sent_at = ? WHERE id = ?",
+                     (datetime.now().isoformat(timespec="seconds"), appt_id))
+
+
+def clear_reminder_sent(appt_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE appointments SET reminder_sent_at = NULL WHERE id = ?", (appt_id,))
+
+
+# --- Reminder templates (editable per appointment type) ----------------------
+def get_reminder_template(type_key: str) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM reminder_templates WHERE type_key = ?",
+                           (type_key,)).fetchone()
+        return dict(row) if row else None
+
+
+def all_reminder_templates() -> dict:
+    with _connect() as conn:
+        return {r["type_key"]: dict(r)
+                for r in conn.execute("SELECT * FROM reminder_templates").fetchall()}
+
+
+def save_reminder_template(type_key: str, lead_days: int, email_subject: str,
+                           email_body: str, sms_text: str, review_days: int = 0,
+                           review_body: str = "", updated_by: str = "") -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO reminder_templates "
+            "(type_key, lead_days, email_subject, email_body, sms_text, review_days, "
+            " review_body, updated_at, updated_by) VALUES (?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(type_key) DO UPDATE SET lead_days=excluded.lead_days, "
+            "email_subject=excluded.email_subject, email_body=excluded.email_body, "
+            "sms_text=excluded.sms_text, review_days=excluded.review_days, "
+            "review_body=excluded.review_body, updated_at=excluded.updated_at, "
+            "updated_by=excluded.updated_by",
+            (type_key, lead_days, email_subject, email_body, sms_text, review_days,
+             review_body, now, updated_by),
+        )
 
 
 def list_appointments(status: Optional[str] = None, limit: int = 200) -> list[dict]:

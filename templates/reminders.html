@@ -1,15 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Reminders · Spa Dashboard{% endblock %}
+{% block title %}Reminders · Valley Medical{% endblock %}
 {% block nav %}reminders{% endblock %}
 {% block content %}
   <div class="page-head">
     <h1 style="margin:0">Appointment reminders</h1>
     {% if can(user.role, 'manage_settings') %}
-    <a class="btn ghost" href="/reminders/settings">Reminder settings</a>{% endif %}
+    <a class="btn ghost" href="/reminders/settings">Reminder templates & settings</a>{% endif %}
   </div>
   <p class="muted" style="margin:.1rem 0 1.1rem">
-    Schedule a follow-up: we add the contact to GoHighLevel and drop them into the
-    workflow for that appointment type. Times are in {{ clinic_tz }}.</p>
+    Search a patient (or add one), pick the date and service, and we'll send the reminder —
+    email, plus a text if they have a mobile. Edit the wording before it goes. Times are in {{ clinic_tz }}.</p>
 
   {% if flash %}
   <div class="banner {{ 'ok' if flash.ok }}"
@@ -17,64 +17,77 @@
     {{ '✓' if flash.ok else '⚠️' }} {{ flash.msg }}</div>
   {% endif %}
 
-  {% if not reminders_enabled %}
+  {% if not send_enabled %}
     <div class="card">
-      <h2>Connect GoHighLevel to turn this on</h2>
-      <p class="muted" style="margin-top:.2rem">Scheduling a reminder creates the contact and
-        adds them to a follow-up workflow in GoHighLevel, so it needs a connected sub-account.</p>
-      <ol class="setup-steps">
-        <li>In GoHighLevel → <strong>Settings → Private Integrations</strong>, give the token the
-            scopes <strong>View/Edit Contacts</strong> and <strong>View Workflows</strong>.</li>
-        <li>Set <code>GHL_API_TOKEN</code> and a reminder location (<code>GHL_REMINDER_LOCATION</code>,
-            or the first entry of <code>GHL_LOCATIONS</code>) in <code>.env</code>.</li>
-        <li>Double-click <code>restart.command</code>, then reload this page.</li>
-      </ol>
+      <h2>Turn on sending first</h2>
+      <p class="muted" style="margin-top:.2rem">Reminders send email from the clinic mailbox and texts through
+        GoHighLevel. Set up at least one: the email monitor (<code>IMAP_USER</code> / <code>IMAP_PASSWORD</code>)
+        for email, and/or <code>GHL_API_TOKEN</code> for texts, then reload.</p>
     </div>
-
   {% else %}
-    {% if not mapping_complete %}
-    <div class="banner" style="background:#fef3c7;border-color:#fcd34d;color:#92400e">
-      ⚠️ Some appointment types aren't linked to a workflow yet.
-      {% if can(user.role, 'manage_settings') %}
-      <a href="/reminders/settings" style="color:#92400e;font-weight:700">Finish the mapping →</a>
-      {% else %}Ask an administrator to finish the mapping in Reminder settings.{% endif %}
-    </div>
-    {% endif %}
-
     {% if can(user.role, 'schedule_reminders') %}
     <div class="card">
-      <h2>Schedule a reminder</h2>
-      <form method="post" action="/reminders" class="appt-form" autocomplete="off">
-        <label class="field">
-          <span>Contact name</span>
-          <input type="text" name="contact_name" required placeholder="Jane Doe">
+      <h2 style="margin-bottom:.2rem">Schedule a reminder</h2>
+      <form method="post" action="/reminders" class="rem-form" autocomplete="off" id="remForm">
+        <input type="hidden" name="patient_id" id="patient_id">
+
+        <label class="field" style="position:relative">
+          <span>Patient</span>
+          <input type="text" name="contact_name" id="patient_search" required
+                 placeholder="Start typing a name…" autocomplete="off">
+          <div id="patient_results" class="ac-list" hidden></div>
+          <small class="muted" id="patient_hint" style="margin-top:.2rem">
+            Pick a patient from the list, or <a href="#" id="addPatientLink">add a new patient</a>.</small>
         </label>
+
         <div class="field-row">
-          <label class="field">
-            <span>Email</span>
-            <input type="email" name="email" placeholder="jane@example.com">
-          </label>
-          <label class="field">
-            <span>Phone</span>
-            <input type="tel" name="phone" placeholder="(902) 555-0123">
-          </label>
+          <label class="field"><span>Email</span>
+            <input type="email" name="email" id="email" placeholder="jane@example.com"></label>
+          <label class="field"><span>Mobile (for text)</span>
+            <input type="tel" name="phone" id="phone" placeholder="(902) 555-0123"></label>
         </div>
-        <label class="field">
-          <span>Appointment type</span>
-          <select name="type_key" required>
-            <option value="" disabled selected>Choose one…</option>
-            {% for key, label in appt_types %}
-            <option value="{{ key }}">{{ label }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label class="field">
-          <span>Appointment date &amp; time</span>
-          <input type="datetime-local" name="appt_at" required>
-        </label>
+
+        <fieldset class="newpt" id="newPatient" hidden>
+          <legend>New patient</legend>
+          <div class="field-row">
+            <label class="field"><span>First name</span><input type="text" name="np_first"></label>
+            <label class="field"><span>Last name</span><input type="text" name="np_last"></label>
+          </div>
+          <small class="muted">We'll create the patient record and attach this appointment to it.</small>
+        </fieldset>
+
+        <div class="field-row">
+          <label class="field"><span>Service</span>
+            <select name="type_key" id="type_key" required>
+              <option value="" disabled selected>Choose one…</option>
+              {% for key, label in appt_types %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+            </select></label>
+          <label class="field"><span>Appointment date &amp; time</span>
+            <input type="datetime-local" name="appt_at" id="appt_at" required></label>
+          <label class="field" style="max-width:150px"><span>Remind this many days before</span>
+            <input type="number" name="lead_days" id="lead_days" min="0" max="60" value="3"></label>
+        </div>
+
+        <details class="rem-content" id="contentBox" open>
+          <summary>Reminder message <span class="muted">(editable)</span></summary>
+          <label class="field"><span>Email subject</span>
+            <input type="text" name="email_subject" id="email_subject"></label>
+          <label class="field"><span>Email message</span>
+            <textarea name="email_body" id="email_body" rows="7"></textarea></label>
+          <label class="field"><span>Text message (short — points to the email)</span>
+            <textarea name="sms_text" id="sms_text" rows="3"></textarea></label>
+          <div class="field-row" style="align-items:flex-end">
+            <label class="field" style="max-width:200px"><span>Review follow-up (days after, 0 = off)</span>
+              <input type="number" name="review_days" id="review_days" min="0" max="60" value="0"></label>
+            <button type="button" class="btn ghost" id="resetTpl" style="margin-bottom:.1rem">↻ Reset to template</button>
+          </div>
+          <label class="field"><span>Review request message <span class="muted">(sends only if days &gt; 0)</span></span>
+            <textarea name="review_body" id="review_body" rows="3"></textarea></label>
+        </details>
+
         <div class="appt-actions">
           <button class="btn" type="submit">Schedule reminder</button>
-          <span class="muted" style="font-size:.8rem">Email or phone is required.</span>
+          <span class="muted" style="font-size:.8rem">Email or a mobile number is required.</span>
         </div>
       </form>
     </div>
@@ -85,28 +98,25 @@
       {% if appointments %}
       <div class="table-wrap">
       <table class="data-table">
-        <thead><tr>
-          <th>Contact</th><th>Type</th><th>Appointment</th><th>Status</th><th></th>
-        </tr></thead>
+        <thead><tr><th>Patient</th><th>Service</th><th>Appointment</th><th>Reminder</th><th></th></tr></thead>
         <tbody>
         {% for a in appointments %}
         <tr class="{{ 'is-cancelled' if a.status == 'cancelled' }}">
-          <td>
-            <div class="who">{{ a.contact_name }}</div>
-            <div class="meta muted">{{ a.email or a.phone or '' }}</div>
-          </td>
+          <td><div class="who">{{ a.contact_name }}</div>
+            <div class="meta muted">{{ a.email or a.phone or '' }}</div></td>
           <td><span class="pill">{{ a.type_label }}</span></td>
           <td>{{ fmt_appt(a.appt_at) }}</td>
           <td>
             {% if a.status == 'cancelled' %}<span class="tag">Cancelled</span>
-            {% else %}<span class="tag responded">Scheduled</span>{% endif %}
+            {% elif a.reminder_sent_at %}<span class="tag responded">Sent</span>
+            {% else %}<span class="tag">Sends {{ fmt_appt(a.reminder_due_at) if a.reminder_due_at else '—' }}</span>{% endif %}
           </td>
           <td style="text-align:right">
             {% if a.status != 'cancelled' and can(user.role, 'schedule_reminders') %}
+            <a class="btn ghost" href="/reminders/{{ a.id }}/edit" style="padding:.2rem .55rem;font-size:.76rem">Edit</a>
             <form method="post" action="/reminders/{{ a.id }}/cancel" style="display:inline"
                   onsubmit="return confirm('Mark this reminder cancelled?')">
-              <button class="btn ghost" type="submit"
-                      style="padding:.2rem .55rem;font-size:.76rem">Cancel</button>
+              <button class="btn ghost" type="submit" style="padding:.2rem .55rem;font-size:.76rem">Cancel</button>
             </form>
             {% endif %}
           </td>
@@ -120,4 +130,84 @@
       {% endif %}
     </div>
   {% endif %}
+
+  <style>
+    .rem-form .field{ display:flex; flex-direction:column; gap:.3rem; margin-top:.6rem; }
+    .rem-form .field > span{ font-size:.82rem; font-weight:600; color:var(--muted); }
+    .rem-form input, .rem-form select, .rem-form textarea{ width:100%; box-sizing:border-box;
+      padding:.55rem .7rem; border:1px solid var(--line); border-radius:8px; font:inherit;
+      background:var(--surface,#fff); color:inherit; }
+    .field-row{ display:flex; gap:.8rem; flex-wrap:wrap; }
+    .field-row .field{ flex:1; min-width:160px; }
+    .ac-list{ position:absolute; top:100%; left:0; right:0; z-index:30; background:var(--surface,#fff);
+      border:1px solid var(--line); border-radius:8px; margin-top:2px; box-shadow:0 8px 24px rgba(0,0,0,.1);
+      max-height:240px; overflow-y:auto; }
+    .ac-item{ padding:.5rem .7rem; cursor:pointer; border-bottom:1px solid var(--line); }
+    .ac-item:last-child{ border-bottom:0; } .ac-item:hover, .ac-item.sel{ background:var(--brand-tint,#eef0ea); }
+    .ac-item .ac-sub{ font-size:.78rem; color:var(--muted); }
+    .newpt{ border:1px dashed var(--line); border-radius:10px; padding:.3rem .8rem .8rem; margin-top:.7rem; }
+    .newpt legend{ font-size:.82rem; font-weight:700; color:#5E6B51; padding:0 .3rem; }
+    .rem-content{ margin-top:.9rem; border-top:1px solid var(--line); padding-top:.3rem; }
+    .rem-content > summary{ cursor:pointer; font-weight:700; color:#5E6B51; padding:.4rem 0; }
+    .appt-actions{ margin-top:1rem; display:flex; gap:.8rem; align-items:center; flex-wrap:wrap; }
+  </style>
+
+  <script>
+  (function(){
+    var box=document.getElementById('patient_search'); if(!box) return;
+    var results=document.getElementById('patient_results'), pid=document.getElementById('patient_id'),
+        email=document.getElementById('email'), phone=document.getElementById('phone'),
+        type=document.getElementById('type_key'), appt=document.getElementById('appt_at'),
+        lead=document.getElementById('lead_days');
+    var fields={subject:document.getElementById('email_subject'),body:document.getElementById('email_body'),
+                sms:document.getElementById('sms_text'),review_days:document.getElementById('review_days'),
+                review_body:document.getElementById('review_body')};
+    var autofill={}, t;
+    // ---- patient search ----
+    box.addEventListener('input', function(){
+      pid.value='';   // typing a fresh name clears the selected patient
+      clearTimeout(t); var q=box.value.trim();
+      if(q.length<2){ results.hidden=true; return; }
+      t=setTimeout(function(){
+        fetch('/api/patients/search?q='+encodeURIComponent(q)).then(r=>r.json()).then(d=>{
+          results.innerHTML='';
+          (d.patients||[]).forEach(function(p){
+            var el=document.createElement('div'); el.className='ac-item';
+            el.innerHTML='<div>'+p.label+'</div><div class="ac-sub">'+(p.email||'')+(p.phone?' · '+p.phone:'')+'</div>';
+            el.addEventListener('click', function(){
+              pid.value=p.id; box.value=p.label; email.value=p.email||''; phone.value=p.phone||'';
+              results.hidden=true; document.getElementById('newPatient').hidden=true; loadContent();
+            });
+            results.appendChild(el);
+          });
+          results.hidden=(d.patients||[]).length===0;
+        }).catch(()=>{ results.hidden=true; });
+      },180);
+    });
+    document.addEventListener('click', function(e){ if(!box.contains(e.target)&&!results.contains(e.target)) results.hidden=true; });
+    // ---- add new patient ----
+    document.getElementById('addPatientLink').addEventListener('click', function(e){
+      e.preventDefault(); var np=document.getElementById('newPatient'); np.hidden=!np.hidden;
+      if(!np.hidden){ pid.value=''; np.querySelector('input[name=np_first]').focus(); }
+    });
+    // ---- editable content from the type template ----
+    function dirty(key){ return fields[key] && fields[key].value!==(autofill[key]||''); }
+    function loadContent(force){
+      if(!type.value) return;
+      var qs='type_key='+encodeURIComponent(type.value)+'&name='+encodeURIComponent(box.value)
+            +'&appt_at='+encodeURIComponent(appt.value||'');
+      fetch('/api/reminder-content?'+qs).then(r=>r.json()).then(c=>{
+        function set(el,key,val){ if(force||!dirty(key)){ el.value=val; autofill[key]=val; } }
+        set(fields.subject,'subject',c.email_subject); set(fields.body,'body',c.email_body);
+        set(fields.sms,'sms',c.sms_text);
+        if(force||lead.value==='3'||lead.value==='') { lead.value=c.lead_days; }
+        set(fields.review_days,'review_days',String(c.review_days||0));
+        set(fields.review_body,'review_body',c.review_body);
+      }).catch(()=>{});
+    }
+    type.addEventListener('change', function(){ loadContent(true); });
+    appt.addEventListener('change', function(){ loadContent(false); });
+    document.getElementById('resetTpl').addEventListener('click', function(){ loadContent(true); });
+  })();
+  </script>
 {% endblock %}

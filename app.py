@@ -51,7 +51,7 @@ import wordpress
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="vmedical-agent dashboard", version="4.37.0")
+app = FastAPI(title="vmedical-agent dashboard", version="4.38.0")
 # Allow the Chrome extension (chrome-extension://<id>) to call the JSON API.
 # Only extension origins get CORS; browser session routes are unaffected.
 app.add_middleware(
@@ -112,6 +112,7 @@ def offline(request: Request):
 def _startup() -> None:
     db.init_db()
     email_monitor.start_background()
+    reminders.start_scheduler()   # delivers due appointment reminders in the background
 
 
 def _ctx(request: Request, user: dict, **extra) -> dict:
@@ -338,6 +339,7 @@ def _reminders_ctx(request: Request, user: dict, **extra) -> dict:
         request, user,
         appt_types=config.APPOINTMENT_TYPES,
         reminders_enabled=config.ghl_contacts_enabled(),
+        send_enabled=(mailer.enabled() or config.ghl_contacts_enabled()),
         mapping_complete=reminders.mapping_complete(),
         fmt_appt=reminders.format_appt,
         clinic_tz=config.CLINIC_TIMEZONE,
@@ -358,25 +360,41 @@ def reminders_page(request: Request):
 
 
 @app.post("/reminders")
-def reminders_create(
-    request: Request,
-    contact_name: str = Form(...),
-    email: str = Form(""),
-    phone: str = Form(""),
-    appt_at: str = Form(...),
-    type_key: str = Form(...),
-):
+async def reminders_create(request: Request):
     user, resp = _guard(request, "schedule_reminders")
     if resp:
         return resp
+    f = await request.form()
+    patient_id = (f.get("patient_id") or "").strip()
+    name = (f.get("contact_name") or "").strip()
+    email = (f.get("email") or "").strip()
+    phone = (f.get("phone") or "").strip()
+    # "Add a patient" path: create the record, then use it.
+    if not patient_id and (f.get("np_last") or f.get("np_first")):
+        pid = db.create_patient(
+            first_name=(f.get("np_first") or "").strip(), last_name=(f.get("np_last") or "").strip(),
+            email=(f.get("np_email") or "").strip(), phone=(f.get("np_phone") or "").strip(),
+            created_by=user["email"])
+        patient_id = str(pid)
+    if patient_id:
+        p = db.get_patient(int(patient_id))
+        if p:
+            name = name or f"{p.get('first_name','')} {p.get('last_name','')}".strip()
+            email = email or (p.get("email") or "")
+            phone = phone or (p.get("phone") or "")
     result = reminders.schedule(
-        name=contact_name, appt_at=appt_at, type_key=type_key,
+        name=name, appt_at=(f.get("appt_at") or ""), type_key=(f.get("type_key") or ""),
         email=email, phone=phone, created_by=user["email"],
+        patient_id=int(patient_id) if patient_id else None,
+        email_subject=f.get("email_subject"), email_body=f.get("email_body"),
+        sms_text=f.get("sms_text"), lead_days=f.get("lead_days"),
+        review_days=f.get("review_days"), review_body=f.get("review_body"),
     )
     if result["ok"]:
-        msg = (f"Reminder scheduled for {contact_name} — added to the "
-               f"“{result['label']}” follow-up in GoHighLevel")
-        msg += " and booked on the calendar." if result.get("booked") else "."
+        ch = result.get("channels", {})
+        chans = " + ".join([c for c, on in (("email", ch.get("email")), ("text", ch.get("sms"))) if on]) or "no channel"
+        msg = (f"Reminder scheduled for {name} — their “{result['label']}” {chans} reminder "
+               f"will send around {reminders.format_appt(result['reminder_due_at'])}.")
         if result.get("warning"):
             msg += f" ⚠️ {result['warning']}"
         request.session["reminder_flash"] = {"ok": True, "msg": msg}
@@ -391,8 +409,50 @@ def reminders_cancel(request: Request, appt_id: int):
     if resp:
         return resp
     db.cancel_appointment(appt_id)
-    request.session["reminder_flash"] = {"ok": True, "msg": "Reminder marked cancelled "
-                                         "(this doesn't remove them from GoHighLevel)."}
+    request.session["reminder_flash"] = {"ok": True, "msg": "Reminder cancelled — it won't send."}
+    return RedirectResponse("/reminders", status_code=303)
+
+
+@app.get("/reminders/{appt_id}/edit", response_class=HTMLResponse)
+def reminders_edit_page(request: Request, appt_id: int):
+    user, resp = _guard(request, "schedule_reminders")
+    if resp:
+        return resp
+    a = db.get_appointment(appt_id)
+    if not a:
+        return templates.TemplateResponse("403.html", _ctx(request, user), status_code=404)
+    return templates.TemplateResponse("reminder_edit.html", _reminders_ctx(request, user, appt=a))
+
+
+@app.post("/reminders/{appt_id}")
+async def reminders_edit_save(request: Request, appt_id: int):
+    user, resp = _guard(request, "schedule_reminders")
+    if resp:
+        return resp
+    a = db.get_appointment(appt_id)
+    if not a:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    f = await request.form()
+    appt_at = (f.get("appt_at") or a["appt_at"]).strip()
+    try:
+        local_dt = reminders.parse_appt_at(appt_at)
+    except ValueError as exc:
+        request.session["reminder_flash"] = {"ok": False, "msg": str(exc)}
+        return RedirectResponse(f"/reminders/{appt_id}/edit", status_code=303)
+    ld = int(f.get("lead_days") or a["lead_days"] or 3)
+    rd = int(f.get("review_days") or 0)
+    from datetime import timedelta as _td
+    reminder_due = (local_dt - _td(days=ld)).strftime("%Y-%m-%dT%H:%M")
+    review_due = (local_dt + _td(days=rd)).strftime("%Y-%m-%dT%H:%M") if rd > 0 else None
+    fields = dict(appt_at=local_dt.strftime("%Y-%m-%dT%H:%M"), lead_days=ld,
+                  email_subject=f.get("email_subject"), email_body=f.get("email_body"),
+                  sms_text=f.get("sms_text"), reminder_due_at=reminder_due,
+                  review_days=rd, review_body=f.get("review_body"), review_due_at=review_due)
+    db.update_appointment(appt_id, **fields)
+    # If it was already sent but we've moved it to the future, let it send again.
+    if a.get("reminder_sent_at") and reminder_due > datetime.now().strftime("%Y-%m-%dT%H:%M"):
+        db.clear_reminder_sent(appt_id)
+    request.session["reminder_flash"] = {"ok": True, "msg": "Reminder updated."}
     return RedirectResponse("/reminders", status_code=303)
 
 
@@ -505,6 +565,10 @@ async def api_reminders_create(request: Request):
         email=body.get("email") or "",
         phone=body.get("phone") or "",
         created_by=staff or actor,
+        patient_id=body.get("patient_id"),
+        email_subject=body.get("email_subject"), email_body=body.get("email_body"),
+        sms_text=body.get("sms_text"), lead_days=body.get("lead_days"),
+        review_days=body.get("review_days"), review_body=body.get("review_body"),
     )
     return JSONResponse(result, status_code=200 if result["ok"] else 400)
 
@@ -514,6 +578,40 @@ def api_appointment_types(request: Request):
     if not _api_authorized(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     return {"types": [{"key": k, "label": l} for k, l in config.APPOINTMENT_TYPES]}
+
+
+@app.get("/api/reminder-content")
+def api_reminder_content(request: Request, type_key: str, name: str = "", appt_at: str = ""):
+    """The editable reminder content for a type, with placeholders filled in —
+    used to pre-fill the schedule form (dashboard + Chrome extension)."""
+    if not _api_authorized(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        local_dt = reminders.parse_appt_at(appt_at) if appt_at else datetime.now()
+    except Exception:  # noqa: BLE001
+        local_dt = datetime.now()
+    return reminders.render_content(type_key, name, local_dt)
+
+
+@app.post("/api/patients")
+async def api_patients_create(request: Request):
+    """Create a local patient from the extension's 'Add patient' path."""
+    actor = _api_authorized(request)
+    if not actor:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "expected JSON"}, status_code=400)
+    first = (body.get("first_name") or "").strip()
+    last = (body.get("last_name") or "").strip()
+    if not (first or last):
+        return JSONResponse({"error": "A first or last name is required."}, status_code=400)
+    pid = db.create_patient(first_name=first, last_name=last,
+                            email=(body.get("email") or "").strip(),
+                            phone=(body.get("phone") or "").strip(),
+                            dob=(body.get("dob") or "").strip(), created_by=actor)
+    return {"ok": True, "patient": db.get_patient(pid)}
 
 
 # --- Client records ----------------------------------------------------------
@@ -2409,12 +2507,13 @@ def patients_list(request: Request, q: str = ""):
 
 @app.get("/api/patients/search")
 def api_patients_search(request: Request, q: str = ""):
-    if not auth.current_user(request):
+    if not _api_authorized(request):   # session OR X-API-Key (for the Chrome extension)
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if len((q or "").strip()) < 2:
         return {"patients": []}
     rows = db.search_patients(q, limit=15)
     return {"patients": [{"id": r["id"], "label": _patient_label(r),
+                          "first_name": r.get("first_name") or "", "last_name": r.get("last_name") or "",
                           "email": r.get("email") or "", "phone": r.get("phone") or ""}
                          for r in rows]}
 
