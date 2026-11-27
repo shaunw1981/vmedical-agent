@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="popup.css">
+  <title>Valley Medical Reminders — Settings</title>
+  <style>
+    body{ width:440px; }
+    .wrap{ padding:1rem 1.1rem 1.3rem; }
+    h1{ font-size:1.1rem; margin:.2rem 0 .1rem; color:var(--brand); }
+    .help{ font-size:.78rem; }
+    code{ background:var(--brand-tint); padding:.05rem .3rem; border-radius:5px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Valley Medical · Reminders</h1>
+    <p class="muted help">These stay on this device. Ask Blue Cow for the dashboard
+      address and API key.</p>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <label class="field"><span>Dashboard address</span>
+      <input type="text" id="baseUrl" placeholder="http://localhost:8000">
+    </label>
+    <p class="muted help">On the clinic Mac this is usually <code>http://localhost:8000</code>.
+      On a tablet or another computer it's the Tailscale address, e.g.
+      <code>http://valley-macmini:8000</code>.</p>
+
+    <label class="field"><span>API key</span>
+      <input type="password" id="apiKey" placeholder="Paste the dashboard API key">
+    </label>
+
+    <label class="field"><span>Your name <span class="muted">(optional — tags who scheduled)</span></span>
+      <input type="text" id="staff" placeholder="e.g. Sarah">
+    </label>
+
+    <div class="two">
+      <button id="saveBtn" class="btn block">Save &amp; connect</button>
+      <button id="testBtn" class="btn ghost block">Test connection</button>
+    </div>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

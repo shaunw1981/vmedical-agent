@@ -1,63 +1,61 @@
-# Valley Medical — Appointment Reminders (Chrome extension)
+# Valley Medical — Reminders (Chrome Extension)
 
-A small popup that lets the team look up a client (or add a new one) and
-schedule an appointment reminder, without opening the full dashboard. It talks
-to the dashboard's JSON API:
+A small Chrome popup that schedules appointment reminders and post-visit
+follow-ups in the Valley Medical dashboard, without opening the dashboard in a
+tab. It talks to the same dashboard API the Reminders page uses.
 
-- `GET /api/appointment-types` — the type dropdown (also used to verify sign-in)
-- `GET /api/contacts/search?q=` — client lookup
-- `POST /api/reminders` — creates/updates the contact in GoHighLevel, drops them
-  into the mapped workflow, and books the appointment (same logic as the website)
+## What it does
 
-## One-time server setup
+- **Search a patient** by name (autocomplete against the dashboard).
+- **Add a new patient** inline when there's no record yet — it creates the
+  record *and* uses it for the reminder.
+- **Pick a service and date/time**, set how many days before to remind.
+- **Edit the message** — email subject/body and the text message pre-fill from
+  the per-service template with the patient's name, service, date and time
+  filled in. "Reset to template" restores the default wording.
+- **Optional review request** a chosen number of days after the visit.
+- **Schedule** — the dashboard sends the email and/or text when due.
 
-The extension signs in with an **access key**. On the Mac, set one in `.env`:
+## Install (unpacked)
 
-```
-DASHBOARD_API_KEY=<a long random value>
-```
-
-Generate one with:
-
-```
-python3 -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-Then run `restart.command`. (The dashboard already allows the extension to call
-`/api/*` via CORS — no other server change needed.)
-
-## Install the extension (per team member)
-
-1. Open Chrome → `chrome://extensions`.
-2. Turn on **Developer mode** (top-right).
+1. Open **chrome://extensions** in Chrome.
+2. Turn on **Developer mode** (top right).
 3. Click **Load unpacked** and choose this `extension/` folder.
-4. Pin the "Appointment Reminders" icon to the toolbar.
+4. The bell icon appears in the toolbar. Pin it for easy access.
 
-## Sign in
+## First-time setup
 
-Click the icon and enter:
+1. Click the extension icon, then **Open settings** (or the ⚙ gear).
+2. **Dashboard address:**
+   - On the clinic Mac: `http://localhost:8000`
+   - On a tablet or another computer (via Tailscale): `http://valley-macmini:8000`
+3. **API key:** paste the dashboard's API key. This is the `DASHBOARD_API_KEY`
+   value set in the dashboard's `.env` on the clinic Mac. Ask Blue Cow if you
+   don't have it.
+4. (Optional) **Your name** — tags who scheduled each reminder.
+5. Click **Save & connect**. Chrome will ask permission to reach the dashboard
+   address — allow it. The settings page confirms the connection.
 
-- **Dashboard address** — e.g. `https://spa.example.com` (the same URL you use
-  for the dashboard).
-- **Access key** — the `DASHBOARD_API_KEY` value from above.
-- **Your email** — so reminders you schedule are attributed to you.
-
-These are stored locally in the browser; you stay signed in until you click
-**Log out**.
-
-## Use it
-
-1. Type a name, email, or phone in **Find a client**.
-2. Click a result to load their details — or click **+ Add a new client** and
-   type them in (whatever you searched is used as a starting point).
-3. Pick the **appointment type** and **date & time**, then **Schedule reminder**.
-
-New clients are created in GoHighLevel automatically on schedule, so lookup +
-add + reminder all happen in one step.
+Settings are stored on the device only (Chrome sync storage); the API key is
+never sent anywhere except to your dashboard.
 
 ## Notes
 
-- The access key is shared; individual attribution comes from the **Your email**
-  field, sent with each reminder.
-- To publish to the Chrome Web Store later, this folder can be zipped as-is
-  (Manifest V3). For internal use, "Load unpacked" is enough.
+- The extension needs network access to the dashboard address you enter. On a
+  tablet that means Tailscale must be connected, same as opening the dashboard
+  in a browser tab.
+- Sending (email/text) is handled by the dashboard, using its existing mail and
+  GoHighLevel setup — the extension only schedules.
+- To point it at a different dashboard, open settings and change the address.
+
+## API endpoints used
+
+All require the `X-API-Key` header:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET  | `/api/patients/search?q=` | Patient autocomplete |
+| POST | `/api/patients` | Create a patient |
+| GET  | `/api/appointment-types` | Service list |
+| GET  | `/api/reminder-content?type_key=&name=&appt_at=` | Pre-fill message |
+| POST | `/api/reminders` | Schedule the reminder |

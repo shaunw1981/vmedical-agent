@@ -1,250 +1,245 @@
 "use strict";
 
-// --- tiny helpers ------------------------------------------------------------
-const $ = (id) => document.getElementById(id);
-const show = (el, on = true) => { el.hidden = !on; };
-let CFG = { url: "", key: "", email: "" };
-let MODE = "existing"; // or "new"
-
-function views(active) {
-  ["view-login", "view-main", "view-done"].forEach((v) => show($(v), v === active));
-  show($("logout"), active !== "view-login");
-}
-
-function setMsg(el, text, kind) {
-  el.textContent = text || "";
-  el.className = "msg" + (kind ? " " + kind : "");
-}
-
-async function api(path, opts = {}) {
-  const headers = Object.assign(
-    { "X-API-Key": CFG.key, "Content-Type": "application/json" },
-    opts.headers || {}
-  );
-  const res = await fetch(CFG.url + path, Object.assign({}, opts, { headers }));
-  let data = null;
-  try { data = await res.json(); } catch (e) { data = null; }
-  if (res.status === 401) {
-    const err = new Error("unauthorized"); err.unauthorized = true; throw err;
-  }
-  return { ok: res.ok, status: res.status, data };
-}
-
-// --- storage -----------------------------------------------------------------
-function loadConfig() {
+// ---- settings --------------------------------------------------------------
+function getSettings() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["url", "key", "email"], (v) => resolve(v || {}));
-  });
-}
-function saveConfig(cfg) {
-  return new Promise((resolve) => chrome.storage.local.set(cfg, resolve));
-}
-function clearConfig() {
-  return new Promise((resolve) => chrome.storage.local.remove(["url", "key", "email"], resolve));
-}
-
-// --- login -------------------------------------------------------------------
-async function doLogin() {
-  const url = $("cfg-url").value.trim().replace(/\/+$/, "");
-  const key = $("cfg-key").value.trim();
-  const email = $("cfg-email").value.trim();
-  if (!url || !key) { setMsg($("login-msg"), "Enter the dashboard address and access key.", "err"); return; }
-  CFG = { url, key, email };
-  setMsg($("login-msg"), "Checking…", "");
-  try {
-    const r = await api("/api/appointment-types");
-    if (!r.ok) throw new Error("bad");
-    await saveConfig(CFG);
-    populateTypes(r.data.types || []);
-    startMain();
-  } catch (e) {
-    if (e.unauthorized) setMsg($("login-msg"), "That access key was rejected.", "err");
-    else setMsg($("login-msg"), "Couldn't reach the dashboard. Check the address.", "err");
-  }
-}
-
-async function doLogout() {
-  await clearConfig();
-  CFG = { url: "", key: "", email: "" };
-  $("cfg-key").value = "";
-  views("view-login");
-}
-
-// --- appointment types -------------------------------------------------------
-function populateTypes(types) {
-  const sel = $("f-type");
-  sel.innerHTML = '<option value="" disabled selected>Choose one…</option>';
-  types.forEach((t) => {
-    const o = document.createElement("option");
-    o.value = t.key; o.textContent = t.label;
-    sel.appendChild(o);
+    chrome.storage.sync.get(["baseUrl", "apiKey", "staff"], (s) => resolve(s || {}));
   });
 }
 
-async function ensureTypes() {
-  if ($("f-type").options.length > 1) return;
-  try {
-    const r = await api("/api/appointment-types");
-    if (r.ok) populateTypes(r.data.types || []);
-  } catch (e) { /* handled elsewhere */ }
+let CFG = { baseUrl: "", apiKey: "", staff: "" };
+
+function api(path, opts = {}) {
+  const headers = Object.assign({ "X-API-Key": CFG.apiKey }, opts.headers || {});
+  if (opts.body) headers["Content-Type"] = "application/json";
+  return fetch(CFG.baseUrl.replace(/\/+$/, "") + path, { ...opts, headers });
 }
 
-// --- search ------------------------------------------------------------------
+// ---- elements --------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const els = {};
+
+function banner(msg, kind) {
+  const b = $("banner");
+  b.textContent = msg;
+  b.className = "banner " + (kind || "");
+  b.hidden = !msg;
+}
+
+// ---- patient search --------------------------------------------------------
 let searchTimer = null;
-function onSearchInput() {
-  const q = $("search").value.trim();
-  clearTimeout(searchTimer);
-  const box = $("results");
-  if (q.length < 2) { box.innerHTML = ""; return; }
-  box.innerHTML = '<div class="res-empty">Searching…</div>';
-  searchTimer = setTimeout(async () => {
-    try {
-      const r = await api("/api/contacts/search?q=" + encodeURIComponent(q));
-      renderResults(r.data && r.data.contacts ? r.data.contacts : []);
-    } catch (e) {
-      if (e.unauthorized) return doLogout();
-      box.innerHTML = '<div class="res-empty">Search failed.</div>';
-    }
-  }, 250);
-}
+let selectedPatientId = "";
 
-function renderResults(rows) {
-  const box = $("results");
-  box.innerHTML = "";
-  if (!rows.length) {
-    box.innerHTML = '<div class="res-empty">No matches found.</div>';
-    return;
-  }
-  rows.forEach((c) => {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "res";
-    const n = document.createElement("div"); n.className = "rn";
-    n.textContent = c.name || "(no name)";
-    const s = document.createElement("div"); s.className = "rs";
-    s.textContent = [c.phone, c.email].filter(Boolean).join(" · ");
-    b.appendChild(n); b.appendChild(s);
-    b.addEventListener("click", () => selectContact(c));
-    box.appendChild(b);
+function wireSearch() {
+  const box = $("patientSearch");
+  const results = $("results");
+  box.addEventListener("input", () => {
+    selectedPatientId = "";
+    $("selected").textContent = "";
+    clearTimeout(searchTimer);
+    const q = box.value.trim();
+    if (q.length < 2) { results.hidden = true; return; }
+    searchTimer = setTimeout(async () => {
+      try {
+        const r = await api("/api/patients/search?q=" + encodeURIComponent(q));
+        const d = await r.json();
+        results.innerHTML = "";
+        (d.patients || []).forEach((p) => {
+          const el = document.createElement("div");
+          el.className = "ac-item";
+          el.innerHTML = '<div>' + escapeHtml(p.label) + '</div><div class="ac-sub">' +
+            escapeHtml((p.email || "") + (p.phone ? " · " + p.phone : "")) + '</div>';
+          el.addEventListener("click", () => {
+            selectedPatientId = p.id;
+            box.value = p.label;
+            $("email").value = p.email || "";
+            $("phone").value = p.phone || "";
+            $("selected").textContent = "✓ Using patient record #" + p.id;
+            results.hidden = true;
+            $("newPatient").hidden = true;
+            loadContent(false);
+          });
+          results.appendChild(el);
+        });
+        results.hidden = (d.patients || []).length === 0;
+      } catch (e) { results.hidden = true; }
+    }, 200);
+  });
+  document.addEventListener("click", (e) => {
+    if (!box.contains(e.target) && !results.contains(e.target)) results.hidden = true;
   });
 }
 
-function splitName(name) {
-  const parts = (name || "").trim().split(/\s+/);
-  return { first: parts.shift() || "", last: parts.join(" ") };
+// ---- add patient -----------------------------------------------------------
+function wireAddPatient() {
+  $("addPatientLink").addEventListener("click", (e) => {
+    e.preventDefault();
+    const np = $("newPatient");
+    np.hidden = !np.hidden;
+    if (!np.hidden) { selectedPatientId = ""; $("npFirst").focus(); }
+  });
+  $("createPatient").addEventListener("click", async () => {
+    const first = $("npFirst").value.trim();
+    const last = $("npLast").value.trim();
+    if (!first && !last) { banner("Enter at least a first or last name.", "err"); return; }
+    try {
+      const r = await api("/api/patients", {
+        method: "POST",
+        body: JSON.stringify({
+          first_name: first, last_name: last,
+          email: $("npEmail").value.trim(), phone: $("npPhone").value.trim(),
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { banner(d.error || "Could not create the patient.", "err"); return; }
+      const p = d.patient;
+      selectedPatientId = p.id;
+      $("patientSearch").value = ((p.first_name || "") + " " + (p.last_name || "")).trim();
+      $("email").value = p.email || $("npEmail").value.trim();
+      $("phone").value = p.phone || $("npPhone").value.trim();
+      $("selected").textContent = "✓ New patient record #" + p.id + " created";
+      $("newPatient").hidden = true;
+      banner("", "");
+      loadContent(false);
+    } catch (e) { banner("Network error creating the patient.", "err"); }
+  });
 }
 
-function selectContact(c) {
-  MODE = "existing";
-  const nm = splitName(c.name);
-  $("f-first").value = nm.first;
-  $("f-last").value = nm.last;
-  $("f-email").value = c.email || "";
-  $("f-phone").value = c.phone || "";
-  openForm("Existing client", false);
+// ---- editable content from the per-service template ------------------------
+const contentFields = ["emailSubject", "emailBody", "smsText", "reviewDays", "reviewBody"];
+let autofill = {};
+
+function dirty(id) { return $(id).value !== (autofill[id] || ""); }
+
+async function loadContent(force) {
+  const type = $("typeKey").value;
+  if (!type) return;
+  const qs = "type_key=" + encodeURIComponent(type) +
+    "&name=" + encodeURIComponent($("patientSearch").value) +
+    "&appt_at=" + encodeURIComponent($("apptAt").value || "");
+  try {
+    const r = await api("/api/reminder-content?" + qs);
+    const c = await r.json();
+    const set = (id, val) => { if (force || !dirty(id)) { $(id).value = val; autofill[id] = String(val); } };
+    set("emailSubject", c.email_subject || "");
+    set("emailBody", c.email_body || "");
+    set("smsText", c.sms_text || "");
+    if (force || $("leadDays").value === "3" || $("leadDays").value === "") $("leadDays").value = c.lead_days;
+    set("reviewDays", String(c.review_days || 0));
+    set("reviewBody", c.review_body || "");
+    $("contentBox").open = true;
+  } catch (e) { /* leave fields as-is */ }
 }
 
-function addNew() {
-  MODE = "new";
-  ["f-first", "f-last", "f-email", "f-phone"].forEach((id) => ($(id).value = ""));
-  // Seed a name from whatever they typed in search, if it looks like a name.
-  const q = $("search").value.trim();
-  if (q && !/[@\d]/.test(q)) { const nm = splitName(q); $("f-first").value = nm.first; $("f-last").value = nm.last; }
-  openForm("New client", true);
-  $("f-first").focus();
-}
+// ---- schedule --------------------------------------------------------------
+function wireSchedule() {
+  $("scheduleBtn").addEventListener("click", async () => {
+    const payload = {
+      patient_id: selectedPatientId || null,
+      contact_name: $("patientSearch").value.trim(),
+      email: $("email").value.trim(),
+      phone: $("phone").value.trim(),
+      type_key: $("typeKey").value,
+      appt_at: $("apptAt").value,
+      lead_days: parseInt($("leadDays").value || "3", 10),
+      email_subject: $("emailSubject").value,
+      email_body: $("emailBody").value,
+      sms_text: $("smsText").value,
+      review_days: parseInt($("reviewDays").value || "0", 10),
+      review_body: $("reviewBody").value,
+      staff: CFG.staff || "",
+    };
+    if (!payload.contact_name) { banner("Choose or add a patient first.", "err"); return; }
+    if (!payload.type_key) { banner("Pick a service.", "err"); return; }
+    if (!payload.appt_at) { banner("Set the appointment date and time.", "err"); return; }
+    if (!payload.email && !payload.phone) { banner("Add an email or a mobile number.", "err"); return; }
 
-function openForm(pillText, isNew) {
-  const pill = $("mode-pill");
-  pill.textContent = pillText;
-  pill.className = "pill" + (isNew ? " new" : "");
-  $("results").innerHTML = "";
-  show($("form"), true);
-  setMsg($("main-msg"), "", "");
+    const btn = $("scheduleBtn");
+    btn.disabled = true; btn.textContent = "Scheduling…";
+    try {
+      const r = await api("/api/reminders", { method: "POST", body: JSON.stringify(payload) });
+      const d = await r.json();
+      if (!r.ok || !d.ok) { banner(d.error || "Could not schedule the reminder.", "err"); return; }
+      const ch = d.channels || {};
+      const via = [ch.email ? "email" : null, ch.sms ? "text" : null].filter(Boolean).join(" + ") || "no channel";
+      let msg = "✓ Reminder set for " + (d.label || "appointment") +
+        " — sends " + fmtWhen(d.reminder_due_at) + " (" + via + ").";
+      if (d.warning) msg += " Note: " + d.warning;
+      banner(msg, "ok");
+      resetForm();
+    } catch (e) {
+      banner("Network error — is the dashboard reachable?", "err");
+    } finally {
+      btn.disabled = false; btn.textContent = "Schedule reminder";
+    }
+  });
+  $("resetTpl").addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); loadContent(true); });
+  $("typeKey").addEventListener("change", () => loadContent(true));
+  $("apptAt").addEventListener("change", () => loadContent(false));
 }
 
 function resetForm() {
-  show($("form"), false);
-  ["f-first", "f-last", "f-email", "f-phone", "f-when"].forEach((id) => ($(id).value = ""));
-  $("f-type").selectedIndex = 0;
-  $("search").value = "";
-  $("results").innerHTML = "";
-  setMsg($("main-msg"), "", "");
-  $("search").focus();
+  selectedPatientId = "";
+  ["patientSearch", "email", "phone", "apptAt", "emailSubject", "emailBody", "smsText", "reviewBody"].forEach((id) => $(id).value = "");
+  $("typeKey").selectedIndex = 0;
+  $("leadDays").value = "3"; $("reviewDays").value = "0";
+  $("selected").textContent = "";
+  autofill = {};
 }
 
-// --- schedule ----------------------------------------------------------------
-async function schedule() {
-  const first = $("f-first").value.trim();
-  const last = $("f-last").value.trim();
-  const name = (first + " " + last).trim();
-  const email = $("f-email").value.trim();
-  const phone = $("f-phone").value.trim();
-  const type_key = $("f-type").value;
-  const appt_at = $("f-when").value;
-
-  if (!name) return setMsg($("main-msg"), "Enter the client's name.", "err");
-  if (!email && !phone) return setMsg($("main-msg"), "Enter an email or phone number.", "err");
-  if (!type_key) return setMsg($("main-msg"), "Choose an appointment type.", "err");
-  if (!appt_at) return setMsg($("main-msg"), "Choose the appointment date and time.", "err");
-
-  setMsg($("main-msg"), "Scheduling…", "");
-  $("schedule").disabled = true;
+// ---- appointment types -----------------------------------------------------
+async function loadTypes() {
+  const sel = $("typeKey");
   try {
-    const r = await api("/api/reminders", {
-      method: "POST",
-      body: JSON.stringify({ contact_name: name, email, phone, type_key, appt_at, staff: CFG.email }),
+    const r = await api("/api/appointment-types");
+    const d = await r.json();
+    (d.types || []).forEach((t) => {
+      const o = document.createElement("option");
+      o.value = t.key; o.textContent = t.label;
+      sel.appendChild(o);
     });
-    if (r.ok && r.data && r.data.ok) {
-      const label = r.data.label || "the appointment";
-      let msg = "Reminder scheduled for " + name + " — added to the " + label + " follow-up";
-      msg += r.data.booked ? " and booked on the calendar." : ".";
-      if (r.data.warning) msg += " Note: " + r.data.warning;
-      $("done-msg").textContent = msg;
-      views("view-done");
-    } else {
-      const err = (r.data && r.data.error) ? r.data.error : "Couldn't schedule the reminder.";
-      setMsg($("main-msg"), err, "err");
-    }
-  } catch (e) {
-    if (e.unauthorized) return doLogout();
-    setMsg($("main-msg"), "Network error — please try again.", "err");
-  } finally {
-    $("schedule").disabled = false;
-  }
+    return true;
+  } catch (e) { return false; }
 }
 
-function startMain() {
-  views("view-main");
-  resetForm();
-  show($("add-new"), true);
+// ---- helpers ---------------------------------------------------------------
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function fmtWhen(iso) {
+  if (!iso) return "soon";
+  try {
+    const d = new Date(iso.length <= 16 ? iso : iso);
+    if (isNaN(d)) return iso.slice(0, 16).replace("T", " ");
+    return d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  } catch (e) { return iso; }
 }
 
-// --- boot --------------------------------------------------------------------
+function defaultApptAt() {
+  // default to tomorrow 9:00am local, in datetime-local format
+  const d = new Date();
+  d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0);
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+// ---- boot ------------------------------------------------------------------
 async function boot() {
-  const c = await loadConfig();
-  if (c && c.url && c.key) {
-    CFG = { url: c.url, key: c.key, email: c.email || "" };
-    // Prefill login form too, in case the key later fails.
-    $("cfg-url").value = c.url; $("cfg-email").value = c.email || "";
-    try {
-      const r = await api("/api/appointment-types");
-      if (r.ok) { populateTypes(r.data.types || []); startMain(); }
-      else throw new Error("bad");
-    } catch (e) {
-      views("view-login");
-      setMsg($("login-msg"), e.unauthorized ? "Your saved key was rejected — sign in again." : "", "err");
-    }
-  } else {
-    views("view-login");
-  }
+  $("gearBtn").addEventListener("click", () => chrome.runtime.openOptionsPage());
+  $("openSetup").addEventListener("click", () => chrome.runtime.openOptionsPage());
 
-  $("login-btn").addEventListener("click", doLogin);
-  $("logout").addEventListener("click", doLogout);
-  $("search").addEventListener("input", onSearchInput);
-  $("add-new").addEventListener("click", addNew);
-  $("reset").addEventListener("click", resetForm);
-  $("schedule").addEventListener("click", schedule);
-  $("again").addEventListener("click", startMain);
+  CFG = Object.assign(CFG, await getSettings());
+  if (!CFG.baseUrl || !CFG.apiKey) {
+    $("setupNeeded").hidden = false;
+    return;
+  }
+  $("main").hidden = false;
+  $("apptAt").value = defaultApptAt();
+  wireSearch(); wireAddPatient(); wireSchedule();
+  const ok = await loadTypes();
+  if (!ok) {
+    banner("Couldn't reach the dashboard. Check the address and API key in settings, and that this device can open it.", "err");
+  }
 }
 
 document.addEventListener("DOMContentLoaded", boot);
